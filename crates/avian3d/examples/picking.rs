@@ -167,7 +167,7 @@ fn draw_pointer_intersections(pointers: Query<&PointerInteraction>, mut gizmos: 
 }
 
 /// An observer to rotate an entity when it is dragged.
-fn rotate_on_drag(drag: On<Pointer<Drag>>, mut transforms: Query<&mut Transform>) {
+fn rotate_on_drag(drag: On<PointerDrag>, mut transforms: Query<&mut Transform>) {
     let mut transform = transforms.get_mut(drag.entity).unwrap();
     transform.rotate_y(drag.delta.x * 0.02);
     transform.rotate_x(drag.delta.y * 0.02);
