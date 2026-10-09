@@ -211,3 +211,54 @@ fn no_ambiguity_errors() {
     .finish();
     app.update();
 }
+
+/// Adding [`JointCollisionDisabled`] between two bodies that touch removes
+/// their contact; it must also leave the island they share, or the island
+/// keeps the ID of a removed contact and its next contact change panics.
+#[test]
+#[cfg(all(feature = "3d", feature = "default-collider"))]
+fn joint_collision_disabled_between_touching_bodies_unlinks_the_contact() {
+    let mut app = create_app();
+    app.finish();
+
+    let cube = |app: &mut App, y: Scalar| {
+        app.world_mut()
+            .spawn((
+                RigidBody::Dynamic,
+                Collider::cuboid(1.0, 1.0, 1.0),
+                Position(Vector::Y * y),
+            ))
+            .id()
+    };
+    app.world_mut().spawn((
+        RigidBody::Static,
+        Collider::cuboid(50.0, 1.0, 50.0),
+        Position(Vector::NEG_Y * 0.5),
+    ));
+
+    // Two stacked cubes settle into one island, touching.
+    let (a, b) = (cube(&mut app, 0.5), cube(&mut app, 1.5));
+    for _ in 0..30 {
+        app.update();
+    }
+    assert!(
+        app.world()
+            .resource::<ContactGraph>()
+            .get(a, b)
+            .is_some_and(|(_, pair)| pair.is_touching())
+    );
+
+    // A joint between them with collisions disabled removes their contact.
+    app.world_mut()
+        .spawn((FixedJoint::new(a, b), JointCollisionDisabled));
+    for _ in 0..5 {
+        app.update();
+    }
+    assert!(app.world().resource::<ContactGraph>().get(a, b).is_none());
+
+    // A third cube lands on the stack: its contact joins the same island.
+    cube(&mut app, 4.0);
+    for _ in 0..120 {
+        app.update();
+    }
+}
