@@ -231,7 +231,15 @@ fn update_sleeping_states(
             && island.constraints_removed > 0
         {
             // The body wants to sleep, but its island needs splitting first.
-            if sleep_timer.0 > islands.split_candidate_sleep_timer {
+            // Of islands as sleepy, the first by ID: not whichever the query
+            // meets first, which hangs on what else was allocated (the order
+            // of the bodies' archetypes and rows), and only one is split a step.
+            let sleepier = sleep_timer.0 > islands.split_candidate_sleep_timer
+                || (sleep_timer.0 == islands.split_candidate_sleep_timer
+                    && islands
+                        .split_candidate
+                        .is_some_and(|c| island_data.island_id < c));
+            if sleepier {
                 // This island is now the sleepiest candidate for splitting.
                 islands.split_candidate = Some(island_data.island_id);
                 islands.split_candidate_sleep_timer = sleep_timer.0;
@@ -622,5 +630,91 @@ fn wake_all_islands(mut commands: Commands, islands: Res<PhysicsIslands>) {
 
     if !sleeping_islands.is_empty() {
         commands.queue(WakeIslands(sleeping_islands));
+    }
+}
+
+#[cfg(test)]
+mod split_order_tests {
+    use core::time::Duration;
+
+    use bevy::{mesh::MeshPlugin, prelude::*, time::TimeUpdateStrategy};
+
+    use crate::prelude::*;
+
+    #[derive(Component)]
+    struct PairOne;
+
+    #[derive(Component)]
+    struct PairTwo;
+
+    /// Two pairs of balls, each pair joined and its joint then removed (each
+    /// island to be split before it sleeps), at rest together, each pair moved
+    /// to an archetype of its own (the second pair's made first if `swapped`):
+    /// where the first to fall asleep are (their x).
+    fn first_asleep(swapped: bool) -> Vec<i32> {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            PhysicsPlugins::default(),
+            TransformPlugin,
+            #[cfg(feature = "bevy_scene")]
+            AssetPlugin::default(),
+            #[cfg(feature = "bevy_scene")]
+            bevy::scene::ScenePlugin,
+            MeshPlugin,
+        ));
+        app.insert_resource(Gravity(Vector::ZERO));
+        let step = Duration::from_secs_f32(1.0 / 64.0);
+        app.insert_resource(Time::<Fixed>::from_duration(step));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(step));
+        app.finish();
+        let mut pairs = Vec::new();
+        for x in [0.0, 10.0] {
+            let ball = |y: f32| {
+                (
+                    RigidBody::Dynamic,
+                    Collider::sphere(0.5),
+                    Position::from_xyz(x, y, 0.0),
+                )
+            };
+            let a = app.world_mut().spawn(ball(0.0)).id();
+            let b = app.world_mut().spawn(ball(3.0)).id();
+            let joint = app.world_mut().spawn(DistanceJoint::new(a, b)).id();
+            pairs.push(([a, b], joint));
+        }
+        app.update();
+        for (_, joint) in &pairs {
+            app.world_mut().despawn(*joint);
+        }
+        // Each pair moved to an archetype of its own, the second pair's made
+        // first if `swapped`.
+        let order = if swapped { [1, 0] } else { [0, 1] };
+        for i in order {
+            for ball in pairs[i].0 {
+                if i == 0 {
+                    app.world_mut().entity_mut(ball).insert(PairOne);
+                } else {
+                    app.world_mut().entity_mut(ball).insert(PairTwo);
+                }
+            }
+        }
+        for _ in 0..256 {
+            app.update();
+            let world = app.world_mut();
+            let mut asleep = world.query_filtered::<&Position, With<Sleeping>>();
+            let mut xs: Vec<i32> = asleep.iter(world).map(|p| p.x as i32).collect();
+            if !xs.is_empty() {
+                xs.sort();
+                return xs;
+            }
+        }
+        panic!("nothing fell asleep");
+    }
+
+    /// Tests that which of two islands as sleepy is split (and sleeps) first does not hang on
+    /// how their bodies' archetypes are ordered.
+    #[test]
+    fn islands_as_sleepy_split_in_the_same_order() {
+        assert_eq!(first_asleep(false), first_asleep(true));
     }
 }
