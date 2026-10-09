@@ -110,7 +110,8 @@ impl ContactNormalPart {
     }
 
     /// Solves the non-penetration constraint, updating the total impulse in `self` and returning
-    /// the incremental impulse to apply to each body.
+    /// the incremental impulse to apply to each body, the accumulated impulse held within
+    /// `max_impulse`, and whether it was held there (the contact gave).
     pub fn solve_impulse<const USE_BIAS: bool>(
         &mut self,
         separation: f32,
@@ -118,7 +119,8 @@ impl ContactNormalPart {
         normal: Vector,
         max_overlap_solve_speed: f32,
         delta_secs: f32,
-    ) -> f32 {
+        max_impulse: f32,
+    ) -> (f32, bool) {
         // Compute the relative velocity along the normal.
         let normal_speed = relative_velocity.dot(normal);
 
@@ -153,12 +155,13 @@ impl ContactNormalPart {
         };
 
         // Clamp the accumulated impulse.
-        let new_impulse = (self.impulse + impulse).max(0.0);
+        let wanted = (self.impulse + impulse).max(0.0);
+        let new_impulse = wanted.min(max_impulse.max(0.0));
         impulse = new_impulse - self.impulse;
         self.impulse = new_impulse;
         self.total_impulse += new_impulse;
 
         // Return the clamped incremental normal impulse.
-        impulse
+        (impulse, wanted > new_impulse)
     }
 }

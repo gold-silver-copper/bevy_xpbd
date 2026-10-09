@@ -1084,6 +1084,7 @@ fn store_contact_impulses(
                     .map_or(default(), |part| part.impulse);
                 contact.normal_impulse = constraint_point.normal_part.total_impulse;
             }
+            manifold.yielded = constraint.yielded;
         }
     }
 

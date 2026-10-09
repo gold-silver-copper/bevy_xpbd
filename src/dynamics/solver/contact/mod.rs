@@ -99,6 +99,11 @@ pub struct ContactConstraint {
     pub contact_id: ContactId,
     /// The index of the contact manifold in the [`ContactPair`].
     pub manifold_index: usize,
+    /// The most force the contact pushes with, summed over its points
+    /// ([`ContactManifold::max_normal_force`]).
+    pub max_normal_force: f32,
+    /// Whether the contact gave: its push held at `max_normal_force`.
+    pub yielded: bool,
 }
 
 impl ContactConstraint {
@@ -207,6 +212,8 @@ impl ContactConstraint {
             points,
             contact_id,
             manifold_index,
+            max_normal_force: manifold.max_normal_force,
+            yielded: false,
         }
     }
 
@@ -271,6 +278,10 @@ impl ContactConstraint {
 
         let delta_translation = body2.delta_position - body1.delta_position;
 
+        // The most the points push with together this substep, and what they push with now.
+        let max_impulse = self.max_normal_force * delta_secs;
+        let mut pushed: f32 = self.points.iter().map(|p| p.normal_part.impulse).sum();
+
         // Normal impulses
         for point in self.points.iter_mut() {
             let r1 = body1.delta_rotation * point.anchor1;
@@ -288,13 +299,16 @@ impl ContactConstraint {
             let relative_velocity = body2.velocity_at_point(r2) - body1.velocity_at_point(r1);
 
             // Compute the incremental impulse. The clamping and impulse accumulation is handled by the method.
-            let impulse_magnitude = point.normal_part.solve_impulse::<USE_BIAS>(
+            let (impulse_magnitude, gave) = point.normal_part.solve_impulse::<USE_BIAS>(
                 separation,
                 relative_velocity,
                 self.normal,
                 max_overlap_solve_speed,
                 delta_secs,
+                max_impulse - (pushed - point.normal_part.impulse),
             );
+            pushed += impulse_magnitude;
+            self.yielded |= gave;
 
             let impulse = impulse_magnitude * self.normal;
 
@@ -363,7 +377,11 @@ impl ContactConstraint {
         for point in self.points.iter_mut() {
             // Skip restitution for speeds below the threshold.
             // We also skip contacts that don't apply an impulse to account for speculative contacts.
-            if point.normal_speed > -threshold || point.normal_part.total_impulse == 0.0 {
+            // A contact that gave is matter crushed: nothing springs back.
+            if point.normal_speed > -threshold
+                || point.normal_part.total_impulse == 0.0
+                || self.yielded
+            {
                 continue;
             }
 
@@ -437,5 +455,101 @@ fn compute_tangent_directions(
             .unwrap_or(force_direction.any_orthonormal_vector());
         let bitangent = force_direction.cross(tangent);
         [tangent, bitangent]
+    }
+}
+
+#[cfg(all(test, feature = "3d"))]
+mod tests {
+    use core::time::Duration;
+
+    use bevy::{ecs::system::SystemParam, mesh::MeshPlugin, prelude::*, time::TimeUpdateStrategy};
+
+    use crate::prelude::*;
+
+    /// The most force a contact pushes with (N).
+    #[derive(Resource)]
+    struct Strength(f32);
+
+    #[derive(SystemParam)]
+    struct Yields<'w> {
+        strength: Res<'w, Strength>,
+    }
+
+    impl CollisionHooks for Yields<'_> {
+        fn modify_contacts(&self, contacts: &mut ContactPair, _commands: &mut Commands) -> bool {
+            for manifold in &mut contacts.manifolds {
+                manifold.max_normal_force = self.strength.0;
+            }
+            true
+        }
+    }
+
+    /// A 1 kg box resting on the ground, its contact pushing with at most
+    /// `strength` (N): how fast it goes down after a second, and whether the
+    /// contact gave in its last step.
+    fn rest_on(strength: f32) -> (f32, bool) {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            PhysicsPlugins::default().with_collision_hooks::<Yields>(),
+            TransformPlugin,
+            #[cfg(feature = "bevy_scene")]
+            AssetPlugin::default(),
+            #[cfg(feature = "bevy_scene")]
+            bevy::scene::ScenePlugin,
+            MeshPlugin,
+        ));
+        app.insert_resource(Gravity(Vector::NEG_Y * 10.0));
+        app.insert_resource(Strength(strength));
+        let step = Duration::from_secs_f32(1.0 / 64.0);
+        app.insert_resource(Time::<Fixed>::from_duration(step));
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(step));
+        app.finish();
+        app.world_mut().spawn((
+            RigidBody::Static,
+            Collider::cuboid(20.0, 20.0, 20.0),
+            Transform::from_xyz(0.0, -10.0, 0.0),
+            ActiveCollisionHooks::MODIFY_CONTACTS,
+        ));
+        let body = app
+            .world_mut()
+            .spawn((
+                RigidBody::Dynamic,
+                Collider::cuboid(1.0, 1.0, 1.0),
+                Mass(1.0),
+                Transform::from_xyz(0.0, 0.5, 0.0),
+                SleepingDisabled,
+            ))
+            .id();
+        let mut gave = false;
+        for _ in 0..64 {
+            app.update();
+            let pairs = app.world().resource::<ContactGraph>();
+            // Settled (its first steps' push out of the overlap aside).
+            gave = pairs
+                .contact_pairs_with(body)
+                .any(|pair| pair.manifolds.iter().any(|m| m.yielded));
+        }
+        let going = app
+            .world()
+            .entity(body)
+            .get::<LinearVelocity>()
+            .unwrap()
+            .0
+            .y;
+        (going, gave)
+    }
+
+    /// Tests that a contact holds what it is strong enough for and gives way under
+    /// more, the body going on at what its weight leaves past the contact's force.
+    #[test]
+    fn a_contact_gives_way_past_its_strength() {
+        let (going, gave) = rest_on(20.0);
+        assert!(going.abs() < 0.05 && !gave, "held: {going} m/s");
+        // Its 10 N weight against 5 N: down at 5 m/s² for a second.
+        let (going, gave) = rest_on(5.0);
+        assert!((going + 5.0).abs() < 0.3 && gave, "gave: {going} m/s");
+        let (going, _) = rest_on(f32::INFINITY);
+        assert!(going.abs() < 0.05, "never gives: {going} m/s");
     }
 }
