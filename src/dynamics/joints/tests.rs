@@ -1260,10 +1260,70 @@ fn spherical_motor_respects_max_torque() {
 
     // With a unit inertia, the most the motor can turn the body is `max_torque * t^2 / 2`.
     let body = app.world().entity(dynamic);
-    let turned = body.get::<Rotation>().unwrap().0.angle_between(Quaternion::IDENTITY);
+    let turned = body
+        .get::<Rotation>()
+        .unwrap()
+        .0
+        .angle_between(Quaternion::IDENTITY);
     let most = 0.5 * max_torque * duration * duration;
-    assert!(turned > 0.5 * most, "the motor turned the body only {turned} rad");
-    assert!(turned < 1.1 * most, "the motor turned the body {turned} rad, past {most}");
+    assert!(
+        turned > 0.5 * most,
+        "the motor turned the body only {turned} rad"
+    );
+    assert!(
+        turned < 1.1 * most,
+        "the motor turned the body {turned} rad, past {most}"
+    );
     let speed = body.get::<AngularVelocity>().unwrap().0.length();
-    assert!(speed < 1.1 * max_torque * duration, "spinning at {speed} rad/s");
+    assert!(
+        speed < 1.1 * max_torque * duration,
+        "spinning at {speed} rad/s"
+    );
+}
+
+/// Tests that a spherical joint's twist limit holds with the joint swung past 120 degrees.
+///
+/// The twist is measured about the bisector of the two swing axes. If the limit let go past some
+/// swing, the twist would run on unchecked there, and the whole of it would be corrected at once,
+/// out of no stored energy, as the swing came back.
+#[cfg(feature = "3d")]
+#[test]
+fn spherical_twist_limit_holds_at_a_wide_swing() {
+    let mut app = create_app();
+    app.finish();
+
+    // Swung 2.4 rad (some 140 degrees) about x, twisting about its own swing axis (-z) at 2 rad/s.
+    let swung = Quaternion::from_rotation_x(2.4);
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let dynamic = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            Rotation(swung),
+            AngularVelocity(swung * Vector::NEG_Z * 2.0),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let mut joint = SphericalJoint::new(anchor, dynamic);
+    joint.twist_limit = Some(AngleLimit::new(-0.5, 0.5));
+    app.world_mut().spawn(joint);
+
+    app.update();
+    for _ in 0..(1.0 / TIMESTEP) as usize {
+        app.update();
+    }
+
+    // The twist about the body's own -z, from the swing-twist decomposition of its rotation.
+    let q = app.world().entity(dynamic).get::<Rotation>().unwrap().0;
+    let q = if q.w < 0.0 { -q } else { q };
+    let twist = 2.0 * q.xyz().dot(Vector::NEG_Z).atan2(q.w);
+    assert!(
+        twist.abs() < 0.55,
+        "twisted {twist} rad, past the limit of 0.5"
+    );
 }

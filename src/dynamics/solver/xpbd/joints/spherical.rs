@@ -125,6 +125,10 @@ impl XpbdConstraint<2> for SphericalJoint {
     }
 }
 
+/// The length of the swing axes' bisector below which the twist is not limited: the swing is
+/// within some 6 degrees of a half turn, where the twist about the bisector has no meaning.
+const TWIST_UNDEFINED_BISECTOR: Scalar = 0.1;
+
 impl SphericalJoint {
     /// Applies the motor's torque, driving the second frame's rotation relative to the first
     /// toward the motor's target rotation and velocity, with no more than its maximum torque.
@@ -161,11 +165,7 @@ impl SphericalJoint {
         let inv_angular_inertia2 = inertia2.effective_inv_angular_inertia();
         let w_about = |n: Vector| {
             AngularConstraint::compute_generalized_inverse_mass(self, inv_angular_inertia1, n)
-                + AngularConstraint::compute_generalized_inverse_mass(
-                    self,
-                    inv_angular_inertia2,
-                    n,
-                )
+                + AngularConstraint::compute_generalized_inverse_mass(self, inv_angular_inertia2, n)
         };
 
         let target_velocity_change = match motor.motor_model {
@@ -268,10 +268,14 @@ impl SphericalJoint {
             let a1 = body1.delta_rotation * solver_data.swing_axis1;
             let a2 = body2.delta_rotation * solver_data.swing_axis2;
 
+            // The twist is measured about the bisector of the two swing axes, which is undefined
+            // only when the swing is a half turn. Short of that the limit holds at any swing:
+            // a limit that let go past some swing would let the twist run on unchecked there,
+            // then correct all of it at once as the swing came back, out of no stored energy.
             let n = a1 + a2;
             let n_magnitude = n.length();
 
-            if n_magnitude <= Scalar::EPSILON {
+            if n_magnitude <= TWIST_UNDEFINED_BISECTOR {
                 return;
             }
 
@@ -292,9 +296,7 @@ impl SphericalJoint {
             let n1 = n1 / n1_magnitude;
             let n2 = n2 / n2_magnitude;
 
-            let max_correction = if a1.dot(a2) > -0.5 { 2.0 * PI } else { dt };
-
-            if let Some(correction) = joint_limit.compute_correction(n, n1, n2, max_correction) {
+            if let Some(correction) = joint_limit.compute_correction(n, n1, n2, PI) {
                 let inv_inertia1 = inertia1.effective_inv_angular_inertia();
                 let inv_inertia2 = inertia2.effective_inv_angular_inertia();
 
