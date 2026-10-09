@@ -1374,3 +1374,56 @@ fn revolute_limit_pressed_past_holds_its_side() {
         "the hinge went on round to {most} rad, past a half turn from its range's middle"
     );
 }
+
+/// Tests that a body swinging and twisting against a spherical joint's swing and twist limits
+/// gains no energy from them.
+#[test]
+#[cfg(feature = "3d")]
+fn spherical_limits_feed_no_energy() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    // An arm a metre long off the joint, swung about a wide axis and twisted at once.
+    let dynamic = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::Y),
+            AngularVelocity(Vector::new(6.0, 3.0, 4.0)),
+            Mass(1.0),
+            AngularInertia::new(Vec3::new(0.1, 0.02, 0.1)),
+        ))
+        .id();
+    let mut joint = SphericalJoint::new(anchor, dynamic).with_local_anchor2(Vector::NEG_Y);
+    joint.swing_limit = Some(AngleLimit::new(-1.2, 1.2));
+    joint.twist_limit = Some(AngleLimit::new(-0.4, 0.4));
+    joint.swing_compliance = 0.005;
+    joint.twist_compliance = 0.005;
+    app.world_mut().spawn(joint);
+
+    let energy = |app: &App| {
+        let e = app.world().entity(dynamic);
+        let (v, w) = (
+            e.get::<LinearVelocity>().unwrap().0,
+            e.get::<AngularVelocity>().unwrap().0,
+        );
+        let r = e.get::<Rotation>().unwrap().0;
+        let i = r * (Vec3::new(0.1, 0.02, 0.1) * (r.inverse() * w));
+        0.5 * v.length_squared() + 0.5 * w.dot(i)
+    };
+    app.update();
+    let start = energy(&app);
+    let mut most = start;
+    for _ in 0..(2.0 / TIMESTEP) as usize {
+        app.update();
+        most = most.max(energy(&app));
+    }
+    assert!(
+        most < start * 1.05,
+        "the energy rose from {start} to {most}"
+    );
+}
