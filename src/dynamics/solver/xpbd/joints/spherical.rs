@@ -109,13 +109,15 @@ impl XpbdConstraint<2> for SphericalJoint {
         // Solve the motor before the joint's point and limits, which take priority.
         self.apply_motor(body1, body2, inertia1, inertia2, solver_data, dt);
 
-        // Align positions
-        solver_data.point_constraint.solve(
-            [body1, body2],
-            [inertia1, inertia2],
-            self.point_compliance,
-            dt,
-        );
+        // Align positions, unless the points are free (an infinite compliance: a drive alone).
+        if self.point_compliance.is_finite() {
+            solver_data.point_constraint.solve(
+                [body1, body2],
+                [inertia1, inertia2],
+                self.point_compliance,
+                dt,
+            );
+        }
 
         // Apply swing limits
         self.apply_swing_limits(body1, body2, inertia1, inertia2, solver_data, dt);
@@ -152,8 +154,15 @@ impl SphericalJoint {
         let frame2 = body2.delta_rotation.0 * solver_data.frame2;
 
         // The rotation from where the second frame is to where it is to be, as a rotation
-        // vector in world space (the shorter way round).
-        let mut error = (frame1 * motor.target_rotation) * frame2.inverse();
+        // vector in world space (the shorter way round); its twist left free, the shortest arc
+        // from the second frame's twist axis to the target's.
+        let target = frame1 * motor.target_rotation;
+        let twist_axis = frame2 * self.twist_axis;
+        let mut error = if motor.free_twist {
+            Quaternion::from_rotation_arc(twist_axis, target * self.twist_axis)
+        } else {
+            target * frame2.inverse()
+        };
         if error.w < 0.0 {
             error = -error;
         }
@@ -161,7 +170,11 @@ impl SphericalJoint {
         let position_error = axis * angle;
 
         let target_velocity = frame1 * motor.target_velocity;
-        let velocity_error = target_velocity - (body2.angular_velocity - body1.angular_velocity);
+        let mut velocity_error =
+            target_velocity - (body2.angular_velocity - body1.angular_velocity);
+        if motor.free_twist {
+            velocity_error = velocity_error.reject_from_normalized(twist_axis);
+        }
 
         let inv_angular_inertia1 = inertia1.effective_inv_angular_inertia();
         let inv_angular_inertia2 = inertia2.effective_inv_angular_inertia();
