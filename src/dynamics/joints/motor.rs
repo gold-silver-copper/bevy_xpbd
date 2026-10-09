@@ -331,6 +331,10 @@ pub struct SphericalMotor {
     pub max_torque: Scalar,
     /// The motor model used for computing the motor torque.
     pub motor_model: MotorModel,
+    /// Whether the motor drives the swing alone, leaving the twist about the joint's
+    /// [`twist_axis`](crate::dynamics::joints::SphericalJoint::twist_axis) free: it turns the
+    /// second frame's twist axis onto the target's, by the shortest arc, and no more.
+    pub free_twist: bool,
 }
 
 #[cfg(feature = "3d")]
@@ -351,6 +355,7 @@ impl SphericalMotor {
             target_velocity: Vector::ZERO,
             max_torque: Scalar::MAX,
             motor_model,
+            free_twist: false,
         }
     }
 
@@ -361,6 +366,13 @@ impl SphericalMotor {
             enabled: false,
             ..Self::new(motor_model)
         }
+    }
+
+    /// Drives the swing alone, leaving the twist free (see [`free_twist`](Self::free_twist)).
+    #[inline]
+    pub const fn with_free_twist(mut self) -> Self {
+        self.free_twist = true;
+        self
     }
 
     /// Sets the target rotation of the second frame relative to the first.

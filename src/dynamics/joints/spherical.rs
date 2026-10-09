@@ -53,6 +53,10 @@ pub struct SphericalJoint {
     /// The extents of the allowed relative rotation of the bodies about the [`twist_axis`](SphericalJoint::twist_axis).
     pub twist_limit: Option<AngleLimit>,
     /// The compliance of the point-to-point constraint (inverse of stiffness, m / N).
+    ///
+    /// Infinite, the points are not held together at all: the joint is its motor and its limits
+    /// alone (a drive turning a body against another, or against a static body, wherever it
+    /// goes).
     pub point_compliance: Scalar,
     /// The compliance for swing (inverse of stiffness, N * m / rad).
     pub swing_compliance: Scalar,
