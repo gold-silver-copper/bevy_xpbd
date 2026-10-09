@@ -138,8 +138,8 @@ impl Plugin for SolverBodyPlugin {
 
         // Turn the world-space angular inertia of solver bodies with them for the joints,
         // which work out their effective masses as they solve, and turn it back to the
-        // step's start for the contacts, whose effective masses were worked out once with it
-        // before the substepping loop.
+        // step's start after them for the contacts, whose effective masses were worked out
+        // once with it before the substepping loop.
         #[cfg(feature = "3d")]
         app.add_systems(
             SubstepSchedule,
@@ -147,7 +147,9 @@ impl Plugin for SolverBodyPlugin {
                 update_solver_body_angular_inertia::<true>
                     .after(SubstepSolverSystems::Relax)
                     .before(XpbdSolverSystems::SolveConstraints),
-                update_solver_body_angular_inertia::<false>.after(SubstepSolverSystems::Damping),
+                update_solver_body_angular_inertia::<false>
+                    .after(XpbdSolverSystems::VelocityProjection)
+                    .before(SubstepSolverSystems::Damping),
             ),
         );
     }
