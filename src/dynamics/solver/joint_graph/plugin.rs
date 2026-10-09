@@ -18,8 +18,12 @@ use crate::{
 };
 use bevy::{
     ecs::{
-        component::ComponentId, entity_disabling::Disabled, lifecycle::HookContext,
-        query::QueryFilter, world::DeferredWorld,
+        component::{ComponentId, ComponentIdFor},
+        entity_disabling::Disabled,
+        event::EntityComponentsTrigger,
+        lifecycle::HookContext,
+        query::QueryFilter,
+        world::DeferredWorld,
     },
     prelude::*,
 };
@@ -118,11 +122,12 @@ impl<T: Component + EntityConstraint<2>> Plugin for JointGraphPlugin<T> {
 
 fn add_joint_to_graph<
     T: Component + EntityConstraint<2>,
-    E: EntityEvent,
+    E: for<'a> EntityEvent<Trigger<'a> = EntityComponentsTrigger<'a>>,
     B: Bundle,
     F: QueryFilter,
 >(
     trigger: On<E, B>,
+    joint_id: ComponentIdFor<T>,
     query: Query<(&T, Has<JointCollisionDisabled>), F>,
     mut commands: Commands,
     mut body_islands: Query<&mut BodyIslandNode, Or<(With<Disabled>, Without<Disabled>)>>,
@@ -131,6 +136,16 @@ fn add_joint_to_graph<
     mut islands: Option<ResMut<PhysicsIslands>>,
 ) {
     let entity = trigger.event_target();
+
+    // Removing `JointDisabled` or `Disabled` by despawning the joint doesn't enable it:
+    // the joint goes too, and its bodies may already be gone.
+    let keeps_joint = trigger
+        .trigger()
+        .new_archetype
+        .is_some_and(|archetype| archetype.contains(joint_id.get()));
+    if !keeps_joint {
+        return;
+    }
 
     let Ok((joint, collision_disabled)) = query.get(entity) else {
         return;
@@ -250,6 +265,9 @@ fn on_disable_joint_collision(
     joint_graph: Res<JointGraph>,
     mut contact_graph: ResMut<ContactGraph>,
     mut constraint_graph: ResMut<ConstraintGraph>,
+    mut islands: Option<ResMut<PhysicsIslands>>,
+    mut body_islands: Query<&mut BodyIslandNode, Or<(With<Disabled>, Without<Disabled>)>>,
+    mut commands: Commands,
 ) {
     let entity = trigger.entity;
 
@@ -268,14 +286,18 @@ fn on_disable_joint_collision(
         (colliders2, body1)
     };
 
-    let contacts_to_remove: Vec<(ContactId, usize)> = colliders
+    let contacts_to_remove: Vec<(ContactId, PairKey, usize, bool)> = colliders
         .iter()
         .flat_map(|collider| {
             contact_graph
                 .contact_edges_with(collider)
                 .filter_map(|edge| {
                     if edge.body1 == Some(other_body) || edge.body2 == Some(other_body) {
-                        Some((edge.id, edge.constraint_handles.len()))
+                        // The pair set is keyed by the colliders, not the bodies.
+                        let pair_key =
+                            PairKey::new(edge.collider1.index_u32(), edge.collider2.index_u32());
+                        let num_constraints = edge.constraint_handles.len();
+                        Some((edge.id, pair_key, num_constraints, edge.island.is_some()))
                     } else {
                         None
                     }
@@ -283,15 +305,35 @@ fn on_disable_joint_collision(
         })
         .collect();
 
-    for (contact_id, num_constraints) in contacts_to_remove {
+    let mut islands_to_wake: Vec<IslandId> = Vec::new();
+
+    for (contact_id, pair_key, num_constraints, has_island) in contacts_to_remove {
         // Remove the contact from the constraint graph.
         for _ in 0..num_constraints {
             constraint_graph.pop_manifold(&mut contact_graph.edges, contact_id, body1, body2);
         }
 
+        // Unlink the contact from its island, as the narrow phase does when a pair
+        // stops touching. Otherwise the island keeps the ID of a removed contact,
+        // and its next contact change panics on the missing edge.
+        if has_island && let Some(islands) = &mut islands {
+            let island = islands.remove_contact(
+                contact_id,
+                &mut body_islands,
+                &mut contact_graph.edges,
+                &joint_graph,
+            );
+            if island.is_sleeping {
+                islands_to_wake.push(island.id);
+            }
+        }
+
         // Remove the contact from the contact graph.
-        let pair_key = PairKey::new(body1.index_u32(), body2.index_u32());
         contact_graph.remove_edge_by_id(&pair_key, contact_id);
+    }
+
+    if !islands_to_wake.is_empty() {
+        commands.queue(WakeIslands(islands_to_wake));
     }
 }
 
