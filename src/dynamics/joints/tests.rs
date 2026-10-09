@@ -1327,3 +1327,50 @@ fn spherical_twist_limit_holds_at_a_wide_swing() {
         "twisted {twist} rad, past the limit of 0.5"
     );
 }
+
+/// Tests that a hinge pressed far past one angle limit is held back toward that limit, not
+/// driven the other way round through its range once it is more than a half turn from the
+/// other limit.
+#[test]
+#[cfg(feature = "3d")]
+fn revolute_limit_pressed_past_holds_its_side() {
+    use crate::math::{PI, TAU};
+    let mut app = create_app();
+    app.finish();
+
+    // Limited from 0 to 2.4 rad, soft past them, flung past 2.4 at 10 rad/s (to some 3.4 rad, short of
+    // a half turn from the middle of its range).
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let dynamic = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            Rotation(Quaternion::from_rotation_z(2.0)),
+            AngularVelocity(Vector::Z * 10.0),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let mut joint = RevoluteJoint::new(anchor, dynamic).with_angle_limits(0.0, 2.4);
+    joint.limit_compliance = 0.01;
+    app.world_mut().spawn(joint);
+
+    app.update();
+    // The hinge's angle followed round continuously from where it set off.
+    let (mut angle, mut most) = (2.0 as Scalar, 0.0 as Scalar);
+    for _ in 0..(1.0 / TIMESTEP) as usize {
+        app.update();
+        let q = app.world().entity(dynamic).get::<Rotation>().unwrap().0;
+        let now = 2.0 * q.z.atan2(q.w);
+        angle += (now - angle + PI).rem_euclid(TAU) - PI;
+        most = most.max(angle);
+    }
+    assert!(
+        most < 4.0,
+        "the hinge went on round to {most} rad, past a half turn from its range's middle"
+    );
+}
