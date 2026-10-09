@@ -1268,6 +1268,63 @@ fn spherical_motor_respects_max_torque() {
     assert!(speed < 1.1 * max_torque * duration, "spinning at {speed} rad/s");
 }
 
+/// Tests that a spherical joint with free points (an infinite point compliance) holds nothing of
+/// the body's place, and that its motor with a free twist turns its twist axis onto the
+/// target's while its spin about that axis goes on.
+#[cfg(feature = "3d")]
+#[test]
+fn spherical_drive_with_free_points_and_twist() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let going = Vector::new(1.0, -2.0, 0.5);
+    let dynamic = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            Rotation(Quat::from_rotation_x(0.6)),
+            LinearVelocity(going),
+            AngularVelocity(Quat::from_rotation_x(0.6) * Vector::Z * 2.0),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let mut joint = SphericalJoint::new(anchor, dynamic)
+        .with_twist_axis(Vector::Z)
+        .with_motor(
+            SphericalMotor::new(MotorModel::SpringDamper {
+                frequency: 5.0,
+                damping_ratio: 1.0,
+            })
+            .with_free_twist(),
+        );
+    joint.point_compliance = f32::INFINITY;
+    app.world_mut().spawn(joint);
+
+    app.update();
+    let duration = 2.0;
+    for _ in 0..(duration / TIMESTEP) as usize {
+        app.update();
+    }
+
+    let body = app.world().entity(dynamic);
+    let at = body.get::<Position>().unwrap().0;
+    assert!(
+        at.distance(going * duration) < 0.1,
+        "the body went on to {at}, not {}",
+        going * duration
+    );
+    let up = body.get::<Rotation>().unwrap().0 * Vector::Z;
+    assert!(up.angle_between(Vector::Z) < 0.01, "its axis is at {up}");
+    let spin = body.get::<AngularVelocity>().unwrap().0;
+    assert!((spin.z - 2.0).abs() < 0.05, "its twist spin went to {spin}");
+}
+
 /// Tests that a spherical joint's twist limit holds with the joint swung past 120 degrees.
 ///
 /// The twist is measured about the bisector of the two swing axes. If the limit let go past some
