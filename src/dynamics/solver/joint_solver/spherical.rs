@@ -98,17 +98,31 @@ impl SphericalJoint {
         else {
             return;
         };
-        // How far the second frame is turned past its target (the shorter way round).
-        let mut past = frames[1] * (frames[0] * motor.target_rotation).inverse();
+        // How far the second frame is turned past its target (the shorter way round); its twist
+        // left free, the shortest arc from the target's twist axis to the second frame's.
+        let target = frames[0] * motor.target_rotation;
+        let twist_axis = frames[1] * self.twist_axis;
+        let mut past = if motor.free_twist {
+            Quaternion::from_rotation_arc(target * self.twist_axis, twist_axis)
+        } else {
+            frames[1] * target.inverse()
+        };
         if past.w < 0.0 {
             past = -past;
         }
         let (axis, angle) = past.to_axis_angle();
         let error = axis * angle;
-        let speed = bodies.spin() - frames[0] * motor.target_velocity;
+        let mut speed = bodies.spin() - frames[0] * motor.target_velocity;
+        if motor.free_twist {
+            speed = speed.reject_from_normalized(twist_axis);
+        }
         let change = -soft.mass_scale * (angular_mass(bodies) * (speed + soft.bias * error))
             - soft.impulse_scale * data.motor;
-        let new = (data.motor + change).clamp_length_max(motor.max_torque * pass.h);
+        let mut new = (data.motor + change).clamp_length_max(motor.max_torque * pass.h);
+        if motor.free_twist {
+            // Nothing about the twist axis: the spin about it is the body's own.
+            new = new.reject_from_normalized(twist_axis);
+        }
         bodies.turn(new - data.motor);
         data.motor = new;
     }
@@ -167,6 +181,9 @@ impl SoftJoint for SphericalJoint {
             _ => data.twist = default(),
         }
 
-        data.point.solve(&mut bodies, self.point_compliance, pass);
+        // The points held together, unless they are free (an infinite compliance: a drive alone).
+        if self.point_compliance.is_finite() {
+            data.point.solve(&mut bodies, self.point_compliance, pass);
+        }
     }
 }
