@@ -1471,3 +1471,64 @@ fn spherical_limits_feed_no_energy() {
         "the energy rose from {start} to {most}"
     );
 }
+
+/// Tests that limbs lying on the ground with their joints pressed against their limits come
+/// to rest and fall asleep: joints solved apart from the contacts kept them creeping.
+#[cfg(all(feature = "3d", feature = "default-collider"))]
+#[test]
+fn limbs_lying_against_their_limits_sleep() {
+    let mut app = create_app();
+    app.insert_resource(Gravity(Vector::NEG_Z * 9.81));
+    app.finish();
+
+    let world = app.world_mut();
+    world.spawn((RigidBody::Static, Collider::half_space(Vector::Z)));
+    // Three capsules end to end along x on the ground, the joints between them bent short of
+    // the limits they are held to: a ball whose cone is turned off the line, a hinge about z
+    // that must fold.
+    let limb = |world: &mut World, x: f32| {
+        world
+            .spawn((
+                RigidBody::Dynamic,
+                Position(Vector::new(x, 0.0, 0.05)),
+                Collider::capsule_endpoints(
+                    0.05,
+                    Vector::new(-0.2, 0.0, 0.0),
+                    Vector::new(0.2, 0.0, 0.0),
+                ),
+                Friction::new(0.6),
+            ))
+            .id()
+    };
+    let limbs = [limb(world, 0.0), limb(world, 0.4), limb(world, 0.8)];
+    let mut ball = SphericalJoint::new(limbs[0], limbs[1])
+        .with_local_frame1(Isometry::new(
+            Vector::X * 0.2,
+            Quat::from_rotation_z(0.6),
+        ))
+        .with_local_frame2(Isometry::new(Vector::NEG_X * 0.2, Quat::IDENTITY))
+        .with_twist_axis(Vector::Z);
+    ball.swing_limit = Some(AngleLimit::new(-0.3, 0.3));
+    ball.twist_limit = Some(AngleLimit::new(-0.2, 0.2));
+    (ball.swing_compliance, ball.twist_compliance) = (0.005, 0.005);
+    let hinge = RevoluteJoint::new(limbs[1], limbs[2])
+        .with_local_anchor1(Vector::X * 0.2)
+        .with_local_anchor2(Vector::NEG_X * 0.2)
+        .with_angle_limits(0.4, 1.2)
+        .with_limit_compliance(0.005);
+    world.spawn((ball, JointCollisionDisabled));
+    world.spawn((hinge, JointCollisionDisabled));
+
+    for _ in 0..(6.0 / TIMESTEP) as usize {
+        app.update();
+    }
+    for limb in limbs {
+        let e = app.world().entity(limb);
+        assert!(
+            e.contains::<Sleeping>(),
+            "a limb still moving at {} m/s, {} rad/s",
+            e.get::<LinearVelocity>().unwrap().length(),
+            e.get::<AngularVelocity>().unwrap().length()
+        );
+    }
+}

@@ -22,10 +22,6 @@ impl Plugin for XpbdSolverPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<XpbdVelocityProjection>();
 
-        app.register_required_components::<FixedJoint, FixedJointSolverData>();
-        app.register_required_components::<RevoluteJoint, RevoluteJointSolverData>();
-        #[cfg(feature = "3d")]
-        app.register_required_components::<SphericalJoint, SphericalJointSolverData>();
         app.register_required_components::<PrismaticJoint, PrismaticJointSolverData>();
         app.register_required_components::<DistanceJoint, DistanceJointSolverData>();
 
@@ -46,10 +42,6 @@ impl Plugin for XpbdSolverPlugin {
         app.add_systems(
             PhysicsSchedule,
             (
-                prepare_xpbd_joint::<FixedJoint>,
-                prepare_xpbd_joint::<RevoluteJoint>,
-                #[cfg(feature = "3d")]
-                prepare_xpbd_joint::<SphericalJoint>,
                 prepare_xpbd_joint::<PrismaticJoint>,
                 prepare_xpbd_joint::<DistanceJoint>,
             )
@@ -63,11 +55,7 @@ impl Plugin for XpbdSolverPlugin {
         // that both add to body velocities.
         app.add_systems(
             SubstepSchedule,
-            (
-                warm_start_xpbd_motors::<RevoluteJoint>,
-                warm_start_xpbd_motors::<PrismaticJoint>,
-            )
-                .chain()
+            warm_start_xpbd_motors::<PrismaticJoint>
                 .ambiguous_with_all()
                 .in_set(SubstepSolverSystems::WarmStart),
         );
@@ -77,10 +65,6 @@ impl Plugin for XpbdSolverPlugin {
             SubstepSchedule,
             (
                 store_pre_solve_deltas,
-                solve_xpbd_joint::<FixedJoint>,
-                solve_xpbd_joint::<RevoluteJoint>,
-                #[cfg(feature = "3d")]
-                solve_xpbd_joint::<SphericalJoint>,
                 solve_xpbd_joint::<PrismaticJoint>,
                 solve_xpbd_joint::<DistanceJoint>,
             )
@@ -100,10 +84,6 @@ impl Plugin for XpbdSolverPlugin {
         app.add_systems(
             PhysicsSchedule,
             (
-                writeback_joint_forces::<FixedJoint>,
-                writeback_joint_forces::<RevoluteJoint>,
-                #[cfg(feature = "3d")]
-                writeback_joint_forces::<SphericalJoint>,
                 writeback_joint_forces::<PrismaticJoint>,
                 writeback_joint_forces::<DistanceJoint>,
             )

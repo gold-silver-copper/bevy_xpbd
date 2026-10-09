@@ -27,10 +27,7 @@
 //! Below are the currently implemented XPBD-based constraints.
 //!
 //! - [Joints](dynamics::joints)
-//!     - [`FixedJoint`]
-//!     - [`RevoluteJoint`]
 //!     - [`DistanceJoint`]
-#![cfg_attr(feature = "3d", doc = "    - [`SphericalJoint`]")]
 //!     - [`PrismaticJoint`]
 //!
 //! Avian's [`ContactConstraint`](dynamics::solver::contact::ContactConstraint)
