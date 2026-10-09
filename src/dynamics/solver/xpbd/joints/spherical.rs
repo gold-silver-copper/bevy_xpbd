@@ -107,6 +107,12 @@ impl XpbdConstraint<2> for SphericalJoint {
     }
 }
 
+/// The length of the swing axes' bisector below which the twist is not limited: past some 150
+/// degrees of swing, where a twist reference's projection across the bisector has shrunk to a
+/// quarter of its length and the measured twist swings wildly as the swing changes (a joint
+/// flung through a half turn was thrown, its twist corrected toward a value that jumped).
+const TWIST_UNDEFINED_BISECTOR: Scalar = 0.5;
+
 impl SphericalJoint {
     /// Applies angle limits to limit the relative rotation of the bodies around the `swing_axis`.
     fn apply_swing_limits(
@@ -163,33 +169,51 @@ impl SphericalJoint {
             let a1 = body1.delta_rotation * solver_data.swing_axis1;
             let a2 = body2.delta_rotation * solver_data.swing_axis2;
 
-            let n = a1 + a2;
-            let n_magnitude = n.length();
-
-            if n_magnitude <= Scalar::EPSILON {
+            // The twist is the turn about the second body's swing axis left once the shortest
+            // swing has carried the first body's swing axis onto it, undefined when the swing is
+            // a half turn and ill-conditioned near it. Short of that the limit holds at any
+            // swing (a limit that let go at 120 degrees, as the XPBD paper's clamp did, let the
+            // twist run on unchecked past it, then corrected all of it at once as the swing came
+            // back, out of no stored energy). It is corrected about that axis, which no swing
+            // turns: a twist measured about the bisector of the two axes and corrected about it
+            // turned the second axis with every correction, the twist limit and the swing limit
+            // undoing each other's work and feeding a swinging limb energy.
+            if (a1 + a2).length() <= TWIST_UNDEFINED_BISECTOR {
                 return;
             }
 
             let b1 = body1.delta_rotation * solver_data.twist_axis1;
             let b2 = body2.delta_rotation * solver_data.twist_axis2;
+            let twist_of = |a2: Vector, b2: Vector| {
+                let carried = Quaternion::from_rotation_arc(a1, a2) * b1;
+                carried.cross(b2).dot(a2).atan2(carried.dot(b2))
+            };
+            let twist = twist_of(a2, b2);
+            let held = twist.clamp(joint_limit.min, joint_limit.max);
 
-            let n = n / n_magnitude;
-
-            let n1 = b1 - n.dot(b1) * n;
-            let n2 = b2 - n.dot(b2) * n;
-            let n1_magnitude = n1.length();
-            let n2_magnitude = n2.length();
-
-            if n1_magnitude <= Scalar::EPSILON || n2_magnitude <= Scalar::EPSILON {
-                return;
-            }
-
-            let n1 = n1 / n1_magnitude;
-            let n2 = n2 / n2_magnitude;
-
-            let max_correction = if a1.dot(a2) > -0.5 { 2.0 * PI } else { dt };
-
-            if let Some(correction) = joint_limit.compute_correction(n, n1, n2, max_correction) {
+            if twist != held {
+                // Corrected along the twist's gradient (how fast turning the second body each
+                // way turns its twist: about its axis wholly, and about the axis across the
+                // swing as far as the swing's own turn carries the twist with it), as an XPBD
+                // constraint is, so that its work is the work of a spring.
+                const STEP: Scalar = 1e-3;
+                let gradient = Vector::new(
+                    twist_of(
+                        Quaternion::from_rotation_x(STEP) * a2,
+                        Quaternion::from_rotation_x(STEP) * b2,
+                    ) - twist,
+                    twist_of(
+                        Quaternion::from_rotation_y(STEP) * a2,
+                        Quaternion::from_rotation_y(STEP) * b2,
+                    ) - twist,
+                    twist_of(
+                        Quaternion::from_rotation_z(STEP) * a2,
+                        Quaternion::from_rotation_z(STEP) * b2,
+                    ) - twist,
+                ) / STEP;
+                let Some(along) = gradient.try_normalize() else {
+                    return;
+                };
                 let inv_inertia1 = inertia1.effective_inv_angular_inertia();
                 let inv_inertia2 = inertia2.effective_inv_angular_inertia();
 
@@ -198,7 +222,7 @@ impl SphericalJoint {
                     body2,
                     inv_inertia1,
                     inv_inertia2,
-                    correction,
+                    along * (twist - held) / gradient.length(),
                     0.0,
                     self.twist_compliance,
                     dt,
