@@ -851,3 +851,86 @@ fn prismatic_motor_combined_position_velocity() {
         displacement
     );
 }
+
+/// Spawns a body on a spherical joint to a static anchor at its centre, driven by `motor`.
+#[cfg(feature = "3d")]
+fn driven_ball(app: &mut App, motor: SphericalMotor) -> Entity {
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let dynamic = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(SphericalJoint::new(anchor, dynamic).with_motor(motor));
+    dynamic
+}
+
+/// Tests that a spherical motor turns the body to its target rotation about any axis.
+#[cfg(feature = "3d")]
+#[test]
+fn spherical_motor_reaches_target_rotation() {
+    let mut app = create_app();
+    app.finish();
+
+    let target = Quaternion::from_axis_angle(Vec3::new(1.0, 1.0, 0.5).normalize(), 1.2);
+    let dynamic = driven_ball(
+        &mut app,
+        SphericalMotor::new(MotorModel::SpringDamper {
+            frequency: 5.0,
+            damping_ratio: 1.0,
+        })
+        .with_target_rotation(target),
+    );
+
+    app.update();
+    for _ in 0..(2.0 / TIMESTEP) as usize {
+        app.update();
+    }
+
+    let rotation = app.world().entity(dynamic).get::<Rotation>().unwrap().0;
+    let off = rotation.angle_between(target);
+    assert!(off < 0.01, "the body is {off} rad from the target rotation");
+}
+
+/// Tests that a spherical motor turns the body with no more than its maximum torque.
+#[cfg(feature = "3d")]
+#[test]
+fn spherical_motor_respects_max_torque() {
+    let mut app = create_app();
+    app.finish();
+
+    let max_torque = 0.5;
+    let target = Quaternion::from_axis_angle(Vec3::new(0.0, 1.0, 1.0).normalize(), 1.5);
+    let dynamic = driven_ball(
+        &mut app,
+        SphericalMotor::new(MotorModel::SpringDamper {
+            frequency: 20.0,
+            damping_ratio: 1.0,
+        })
+        .with_target_rotation(target)
+        .with_max_torque(max_torque),
+    );
+
+    app.update();
+    let duration = 0.5;
+    for _ in 0..(duration / TIMESTEP) as usize {
+        app.update();
+    }
+
+    // With a unit inertia, the most the motor can turn the body is `max_torque * t^2 / 2`.
+    let body = app.world().entity(dynamic);
+    let turned = body.get::<Rotation>().unwrap().0.angle_between(Quaternion::IDENTITY);
+    let most = 0.5 * max_torque * duration * duration;
+    assert!(turned > 0.5 * most, "the motor turned the body only {turned} rad");
+    assert!(turned < 1.1 * most, "the motor turned the body {turned} rad, past {most}");
+    let speed = body.get::<AngularVelocity>().unwrap().0.length();
+    assert!(speed < 1.1 * max_torque * duration, "spinning at {speed} rad/s");
+}
