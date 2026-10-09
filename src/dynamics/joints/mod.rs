@@ -231,6 +231,8 @@ pub use motor::{AngularMotor, LinearMotor, MotorModel};
 pub use prismatic::PrismaticJoint;
 pub use revolute::RevoluteJoint;
 #[cfg(feature = "3d")]
+pub use motor::SphericalMotor;
+#[cfg(feature = "3d")]
 pub use spherical::SphericalJoint;
 
 use crate::{dynamics::joints::joint_graph::JointGraph, prelude::*};

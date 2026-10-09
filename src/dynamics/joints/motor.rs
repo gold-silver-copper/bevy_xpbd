@@ -306,3 +306,84 @@ impl LinearMotor {
         self
     }
 }
+
+/// A motor for driving the relative rotation of a [`SphericalJoint`].
+///
+/// The motor drives the rotation of the second body's [`JointFrame`] relative to the first
+/// body's frame toward [`target_rotation`](Self::target_rotation), and their relative angular
+/// velocity toward [`target_velocity`](Self::target_velocity), with a torque no greater than
+/// [`max_torque`](Self::max_torque) about the axis it turns them. This is the three-axis
+/// counterpart of [`AngularMotor`], useful for driving ball joints such as the hips and
+/// shoulders of an animated character with limited strength.
+///
+/// [`SphericalJoint`]: crate::dynamics::joints::SphericalJoint
+/// [`JointFrame`]: crate::dynamics::joints::JointFrame
+#[cfg(feature = "3d")]
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serialize", reflect(Serialize, Deserialize))]
+#[reflect(Debug, PartialEq)]
+pub struct SphericalMotor {
+    /// Whether the motor is enabled.
+    pub enabled: bool,
+    /// The target rotation of the second frame relative to the first.
+    pub target_rotation: Quat,
+    /// The target relative angular velocity, in the first frame's coordinates (rad/s).
+    pub target_velocity: Vec3,
+    /// The maximum torque the motor can apply (N·m).
+    pub max_torque: f32,
+    /// The motor model used for computing the motor torque.
+    pub motor_model: MotorModel,
+}
+
+#[cfg(feature = "3d")]
+impl Default for SphericalMotor {
+    fn default() -> Self {
+        Self::new_disabled(MotorModel::DEFAULT)
+    }
+}
+
+#[cfg(feature = "3d")]
+impl SphericalMotor {
+    /// Creates a new enabled motor with the given model, holding the frames aligned.
+    #[inline]
+    pub const fn new(motor_model: MotorModel) -> Self {
+        Self {
+            enabled: true,
+            target_rotation: Quat::IDENTITY,
+            target_velocity: Vec3::ZERO,
+            max_torque: f32::MAX,
+            motor_model,
+        }
+    }
+
+    /// Creates a new disabled motor with the given model.
+    #[inline]
+    pub const fn new_disabled(motor_model: MotorModel) -> Self {
+        Self {
+            enabled: false,
+            ..Self::new(motor_model)
+        }
+    }
+
+    /// Sets the target rotation of the second frame relative to the first.
+    #[inline]
+    pub const fn with_target_rotation(mut self, target_rotation: Quat) -> Self {
+        self.target_rotation = target_rotation;
+        self
+    }
+
+    /// Sets the target relative angular velocity, in the first frame's coordinates.
+    #[inline]
+    pub const fn with_target_velocity(mut self, target_velocity: Vec3) -> Self {
+        self.target_velocity = target_velocity;
+        self
+    }
+
+    /// Sets the maximum torque the motor can apply.
+    #[inline]
+    pub const fn with_max_torque(mut self, max_torque: f32) -> Self {
+        self.max_torque = max_torque;
+        self
+    }
+}
