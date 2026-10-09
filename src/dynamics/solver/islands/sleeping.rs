@@ -429,14 +429,15 @@ impl Command for SleepIslands {
 
             // Still as they sleep: what velocity a body was let fall asleep with (below the
             // sleep threshold, but not none) would move it again the moment it woke, out of no
-            // push.
+            // push. (Set unseen: a velocity changed wakes a body.)
+            use bevy::ecs::change_detection::DetectChangesMut;
             for (entity, _) in &bodies_to_sleep {
                 if let Ok(mut body) = world.get_entity_mut(*entity) {
                     if let Some(mut v) = body.get_mut::<LinearVelocity>() {
-                        v.0 = Vector::ZERO;
+                        v.bypass_change_detection().0 = Vector::ZERO;
                     }
                     if let Some(mut w) = body.get_mut::<AngularVelocity>() {
-                        w.0 = AngularVelocity::ZERO.0;
+                        w.bypass_change_detection().0 = AngularVelocity::ZERO.0;
                     }
                 }
             }
