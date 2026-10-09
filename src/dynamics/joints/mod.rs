@@ -224,6 +224,8 @@ mod tests;
 
 pub use distance::DistanceJoint;
 pub use fixed::FixedJoint;
+#[cfg(feature = "3d")]
+pub use motor::SphericalMotor;
 pub use motor::{AngularMotor, LinearMotor, MotorModel};
 pub use prismatic::PrismaticJoint;
 pub use revolute::RevoluteJoint;
@@ -447,17 +449,13 @@ impl AngleLimit {
             phi = PI - phi;
         }
 
-        // Map the angle to the [-pi, pi] range.
-        if phi > PI {
-            phi -= TAU;
-        }
-
-        // The XPBD rigid body paper has this, but the angle
-        // should already be in the correct range.
-        //
-        // if phi < -PI {
-        //     phi += TAU;
-        // }
+        // Map the angle to the half turn either way of the middle of the limits, so that an
+        // angle pressed past one limit is measured as past it rather than, once it is more
+        // than a half turn from the other, as short of that one (a hinge limited from 0 to
+        // 2.4 radians, folded to 3.3 under a load, would otherwise be read as at -3.0, and
+        // driven the other way round, through its whole range).
+        let middle = (self.min + self.max) * 0.5;
+        phi = middle + (phi - middle + PI).rem_euclid(TAU) - PI;
 
         // Only apply a correction if the limit is violated.
         if phi < self.min || phi > self.max {

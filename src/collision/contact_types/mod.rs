@@ -375,6 +375,15 @@ pub struct ContactManifold {
     /// such as conveyor belts.
     #[cfg(feature = "3d")]
     pub tangent_velocity: Vector,
+    /// The most force the contact pushes the bodies apart with, summed over its points
+    /// (N, or kg⋅m/s²): past it the contact gives, the bodies going on into each other,
+    /// as matter yields at its strength over the area it meets on (PhysX's `setMaxImpulse`).
+    ///
+    /// Defaults to infinity: a contact that never gives. Set in
+    /// [`CollisionHooks::modify_contacts`](crate::collision::hooks::CollisionHooks::modify_contacts).
+    pub max_normal_force: Scalar,
+    /// Whether the contact gave in the last step: its push held at [`max_normal_force`](Self::max_normal_force).
+    pub yielded: bool,
 }
 
 impl ContactManifold {
@@ -396,6 +405,8 @@ impl ContactManifold {
             tangent_speed: 0.0,
             #[cfg(feature = "3d")]
             tangent_velocity: Vector::ZERO,
+            max_normal_force: Scalar::INFINITY,
+            yielded: false,
         }
     }
 
