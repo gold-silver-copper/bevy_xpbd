@@ -613,8 +613,6 @@ pub struct ContactSoftnessCoefficients {
     pub dynamic: SoftnessCoefficients,
     /// The [`SoftnessCoefficients`] used for contacts against static or kinematic bodies.
     pub non_dynamic: SoftnessCoefficients,
-    /// The [`SoftnessCoefficients`] used for the rigid parts of joints.
-    pub joint: SoftnessCoefficients,
 }
 
 impl Default for ContactSoftnessCoefficients {
@@ -622,14 +620,9 @@ impl Default for ContactSoftnessCoefficients {
         Self {
             dynamic: SoftnessParameters::new(10.0, 30.0).compute_coefficients(1.0 / 60.0),
             non_dynamic: SoftnessParameters::new(10.0, 60.0).compute_coefficients(1.0 / 60.0),
-            joint: SoftnessParameters::new(JOINT_DAMPING_RATIO, 60.0)
-                .compute_coefficients(1.0 / 60.0),
         }
     }
 }
-
-/// The damping ratio of the rigid parts of joints (as in `Box2D`).
-const JOINT_DAMPING_RATIO: f32 = 2.0;
 
 fn update_contact_softness(
     mut coefficients: ResMut<ContactSoftnessCoefficients>,
@@ -654,10 +647,6 @@ fn update_contact_softness(
         coefficients.non_dynamic =
             SoftnessParameters::new(solver_config.contact_damping_ratio, 2.0 * hz)
                 .compute_coefficients(h);
-
-        // Joints are as stiff as the contacts against static bodies, as in Box2D.
-        coefficients.joint =
-            SoftnessParameters::new(JOINT_DAMPING_RATIO, 2.0 * hz).compute_coefficients(h);
     }
 }
 

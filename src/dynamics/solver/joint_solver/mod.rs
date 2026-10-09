@@ -128,7 +128,10 @@ impl Plugin for JointSolverPlugin {
 pub struct Pass {
     /// The substep's length (s).
     pub h: f32,
-    /// The softness of a rigid part.
+    /// The softness of a rigid part: a contact's against a static body, twice as stiff as one
+    /// between dynamic bodies, as `Box2D` has its joints, but damped as the contacts are (at
+    /// Box2D's twice critical damping, joints held looser than the contacts pressing on them
+    /// let a fallen rider's legs end up under its motorcycle).
     pub rigid: SoftnessCoefficients,
     /// Whether the rigid parts correct their error (the solve pass) or only their speed (relax).
     pub use_bias: bool,
@@ -289,50 +292,77 @@ pub fn limit_side(
     change
 }
 
-/// Maps an angle to within a half turn of the middle of a limit, so that an angle pressed past
-/// one end is measured as past it, not as short of the other.
-pub fn about_middle(angle: f32, limit: AngleLimit) -> f32 {
-    let middle = (limit.min + limit.max) * 0.5;
-    middle + (angle - middle + PI).rem_euclid(TAU) - PI
+/// How far past its end a compliant limit stretches (rad) before it stops as a rigid one: a
+/// joint's tissue is not stretched without end. Unstopped, a limb pressed by the contacts or
+/// flung far past its range stored its spring's energy without bound, and once past a half turn
+/// from the range's middle the angle read as short of the other end and the spring let go the
+/// other way round at once (a dead elbow pressed 1.8 rad past its end flung the arm).
+pub const LIMIT_STRETCH: f32 = 0.5;
+
+/// An angle held within a limit, both sides of it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[cfg_attr(feature = "serialize", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serialize", reflect(Serialize, Deserialize))]
+#[reflect(Debug, PartialEq)]
+pub struct LimitPart {
+    /// The last impulses of the lower and the upper side (N·m·s).
+    pub impulses: [f32; 2],
+    /// The last impulses of a compliant limit's rigid stops, [`LIMIT_STRETCH`] past its ends.
+    pub stops: [f32; 2],
 }
 
-/// Both sides of an angle limit about `axis` (rad): the angle `angle`, its impulses `[lower,
-/// upper]`. Returns the angular impulse applied.
-pub fn angle_limit(
-    bodies: &mut Bodies,
-    impulses: &mut [f32; 2],
-    limit: AngleLimit,
-    angle: f32,
-    axis: AngularVector,
-    compliance: f32,
-    pass: &Pass,
-) {
-    let k = bodies.inv_mass_about(axis);
-    if k <= f32::EPSILON {
-        return;
+impl LimitPart {
+    /// Holds the angle `angle` (rad) about `axis` within `limit`.
+    pub fn solve(
+        &mut self,
+        bodies: &mut Bodies,
+        limit: AngleLimit,
+        angle: f32,
+        axis: AngularVector,
+        compliance: f32,
+        pass: &Pass,
+    ) {
+        // Read within a half turn of the range's middle, so that an angle pressed past one end
+        // is measured as past it.
+        let middle = (limit.min + limit.max) * 0.5;
+        let angle = middle + (angle - middle + PI).rem_euclid(TAU) - PI;
+        let k = bodies.inv_mass_about(axis);
+        if k <= f32::EPSILON {
+            return;
+        }
+        let spring = compliant(compliance, k, pass);
+        let stretch = if spring.is_some() { LIMIT_STRETCH } else { 0.0 };
+        for (side, (past, sign)) in [(angle - limit.min, 1.0), (limit.max - angle, -1.0)]
+            .into_iter()
+            .enumerate()
+        {
+            let speed = sign * dot(axis, bodies.spin());
+            let change = limit_side(&mut self.impulses[side], past, speed, 1.0 / k, spring, pass);
+            bodies.turn(axis * (sign * change));
+            if spring.is_some() {
+                let speed = sign * dot(axis, bodies.spin());
+                let change = limit_side(
+                    &mut self.stops[side],
+                    past + stretch,
+                    speed,
+                    1.0 / k,
+                    None,
+                    pass,
+                );
+                bodies.turn(axis * (sign * change));
+            }
+        }
     }
-    let spring = compliant(compliance, k, pass);
-    let angle = about_middle(angle, limit);
-    let speed = dot(axis, bodies.spin());
-    let lower = limit_side(
-        &mut impulses[0],
-        angle - limit.min,
-        speed,
-        1.0 / k,
-        spring,
-        pass,
-    );
-    bodies.turn(axis * lower);
-    let speed = dot(axis, bodies.spin());
-    let upper = limit_side(
-        &mut impulses[1],
-        limit.max - angle,
-        -speed,
-        1.0 / k,
-        spring,
-        pass,
-    );
-    bodies.turn(-axis * upper);
+
+    /// The angular impulse along `axis`.
+    pub fn along(&self, axis: AngularVector) -> AngularVector {
+        axis * self.net()
+    }
+
+    /// The impulse toward the upper end.
+    pub fn net(&self) -> f32 {
+        self.impulses[0] + self.stops[0] - self.impulses[1] - self.stops[1]
+    }
 }
 
 /// A point at which two bodies are held together.
@@ -514,7 +544,7 @@ fn solve<J: SoftJoint, S: Stage>(
 ) {
     let pass = Pass {
         h: time.delta_secs(),
-        rigid: softness.joint,
+        rigid: softness.non_dynamic,
         use_bias: S::BIAS,
         warm: config.warm_start_coefficient,
     };
