@@ -291,11 +291,36 @@ impl SphericalJoint {
 
             let b1 = body1.delta_rotation * solver_data.twist_axis1;
             let b2 = body2.delta_rotation * solver_data.twist_axis2;
-            let carried = Quat::from_rotation_arc(a1, a2) * b1;
-            let twist = carried.cross(b2).dot(a2).atan2(carried.dot(b2));
+            let twist_of = |a2: Vector, b2: Vector| {
+                let carried = Quat::from_rotation_arc(a1, a2) * b1;
+                carried.cross(b2).dot(a2).atan2(carried.dot(b2))
+            };
+            let twist = twist_of(a2, b2);
             let held = twist.clamp(joint_limit.min, joint_limit.max);
 
             if twist != held {
+                // Corrected along the twist's gradient (how fast turning the second body each
+                // way turns its twist: about its axis wholly, and about the axis across the
+                // swing as far as the swing's own turn carries the twist with it), as an XPBD
+                // constraint is, so that its work is the work of a spring.
+                const STEP: f32 = 1e-3;
+                let gradient = Vector::new(
+                    twist_of(
+                        Quat::from_rotation_x(STEP) * a2,
+                        Quat::from_rotation_x(STEP) * b2,
+                    ) - twist,
+                    twist_of(
+                        Quat::from_rotation_y(STEP) * a2,
+                        Quat::from_rotation_y(STEP) * b2,
+                    ) - twist,
+                    twist_of(
+                        Quat::from_rotation_z(STEP) * a2,
+                        Quat::from_rotation_z(STEP) * b2,
+                    ) - twist,
+                ) / STEP;
+                let Some(along) = gradient.try_normalize() else {
+                    return;
+                };
                 let inv_inertia1 = inertia1.effective_inv_angular_inertia();
                 let inv_inertia2 = inertia2.effective_inv_angular_inertia();
 
@@ -304,7 +329,7 @@ impl SphericalJoint {
                     body2,
                     inv_inertia1,
                     inv_inertia2,
-                    a2 * (twist - held),
+                    along * (twist - held) / gradient.length(),
                     0.0,
                     self.twist_compliance,
                     dt,
