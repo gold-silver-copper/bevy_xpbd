@@ -21,7 +21,7 @@ use crate::{
 #[cfg(feature = "3d")]
 use crate::{
     MatExt, QuatExt,
-    dynamics::integrator::{IntegrationSystems, integrate_positions},
+    dynamics::solver::{schedule::SubstepSolverSystems, xpbd::XpbdSolverSystems},
     prelude::SubstepSchedule,
 };
 
@@ -136,14 +136,19 @@ impl Plugin for SolverBodyPlugin {
             writeback_solver_bodies.in_set(SolverSystems::Finalize),
         );
 
-        // Update the world-space angular inertia of solver bodies right after position integration
-        // in the substepping loop.
+        // Turn the world-space angular inertia of solver bodies with them for the joints,
+        // which work out their effective masses as they solve, and turn it back to the
+        // step's start for the contacts, whose effective masses were worked out once with it
+        // before the substepping loop.
         #[cfg(feature = "3d")]
         app.add_systems(
             SubstepSchedule,
-            update_solver_body_angular_inertia
-                .in_set(IntegrationSystems::Position)
-                .after(integrate_positions),
+            (
+                update_solver_body_angular_inertia::<true>
+                    .after(SubstepSolverSystems::Relax)
+                    .before(XpbdSolverSystems::SolveConstraints),
+                update_solver_body_angular_inertia::<false>.after(SubstepSolverSystems::Damping),
+            ),
         );
     }
 
@@ -367,8 +372,13 @@ fn writeback_solver_bodies(
     diagnostics.finalize += start.elapsed();
 }
 
+/// Updates the world-space angular inertia of solver bodies: to the rotation the body has
+/// within the step if `TURNED`, or to its rotation at the step's start otherwise.
+///
+/// [`Rotation`] is only written back after the last substep, so within the step a body's
+/// current rotation is `delta_rotation * rotation`.
 #[cfg(feature = "3d")]
-pub(crate) fn update_solver_body_angular_inertia(
+pub(crate) fn update_solver_body_angular_inertia<const TURNED: bool>(
     mut solver_bodies: ResMut<SolverBodies>,
     mut query: Query<(&SolverBodyIndex, &ComputedAngularInertia, &Rotation)>,
 ) {
@@ -378,9 +388,15 @@ pub(crate) fn update_solver_body_angular_inertia(
         MIN_PAR_ITER_ENTITIES,
         |(index, angular_inertia, rotation)| {
             // SAFETY: Each entity has a unique, valid solver body index, so the writes below
-            //         target disjoint inertias.
+            //         target disjoint bodies and inertias.
+            let body = unsafe { access.body_unchecked_mut(*index) };
+            let rotation = if TURNED {
+                body.delta_rotation * rotation.0
+            } else {
+                rotation.0
+            };
             let inertia = unsafe { access.inertia_unchecked_mut(*index) };
-            inertia.update_effective_inv_angular_inertia(angular_inertia, rotation.0);
+            inertia.update_effective_inv_angular_inertia(angular_inertia, rotation);
         },
     );
 }

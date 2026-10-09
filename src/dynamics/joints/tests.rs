@@ -1064,3 +1064,69 @@ fn joint_damping_damps_free_axis_of_rotation_locked_body() {
     let spin = app.world().get::<AngularVelocity>(body).unwrap().y;
     assert!(spin.abs() < 0.05, "free axis was not damped: {spin}");
 }
+
+/// Tests that a thin rod tumbling on a ball joint gains neither energy nor angular momentum
+/// about the joint: the joint must see the rod's inertia as the rod is turned in each
+/// substep, not as it was at the start of the step.
+#[cfg(feature = "3d")]
+#[test]
+fn tumbling_rod_on_ball_joint_conserves_momentum() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+
+    // A rod 1 m long along x, its end on the joint at the origin.
+    let (mass, inertia) = (1.0, Vec3::new(1e-3, 0.0835, 0.0835));
+    let spin = Vector::new(40.0, 20.0, 0.0);
+    let centre = Vector::X * 0.5;
+    let rod = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(centre),
+            Mass(mass),
+            AngularInertia::new(inertia),
+            AngularVelocity(spin),
+            LinearVelocity(spin.cross(centre)),
+        ))
+        .id();
+
+    app.world_mut()
+        .spawn(SphericalJoint::new(anchor, rod).with_local_anchor2(-centre));
+
+    let state = |app: &App| {
+        let body = app.world().entity(rod);
+        let at = body.get::<Position>().unwrap().0;
+        let turn = body.get::<Rotation>().unwrap().0;
+        let v = body.get::<LinearVelocity>().unwrap().0;
+        let w = body.get::<AngularVelocity>().unwrap().0;
+        let world_inertia = Mat3::from_quat(turn)
+            * Mat3::from_diagonal(inertia)
+            * Mat3::from_quat(turn).transpose();
+        let momentum = world_inertia * w + mass * at.cross(v);
+        let energy = 0.5 * mass * v.length_squared() + 0.5 * w.dot(world_inertia * w);
+        (momentum, energy)
+    };
+    let (momentum0, energy0) = state(&app);
+
+    app.update();
+    for _ in 0..(1.0 / TIMESTEP) as usize {
+        app.update();
+    }
+
+    // The joint's corrections lose some energy; they must not make any. Stale inertia
+    // (as turned at the step's start) gives about a megajoule here.
+    let (momentum, energy) = state(&app);
+    assert!(
+        energy <= energy0,
+        "the rod gained energy: {energy0} J -> {energy} J"
+    );
+    assert!(
+        momentum.length() <= momentum0.length() * 1.01,
+        "the rod gained angular momentum about the joint: {momentum0} -> {momentum}"
+    );
+}
