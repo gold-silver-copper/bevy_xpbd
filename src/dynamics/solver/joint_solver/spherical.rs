@@ -11,19 +11,15 @@ pub struct SphericalJointSolverData {
     frames: [Quaternion; 2],
     /// The axes the swing and the twist were last limited about (the twist's its gradient).
     axes: [Vector; 2],
-    /// The impulses of the swing limit's two sides.
-    swing: [Scalar; 2],
-    /// The impulses of the twist limit's two sides.
-    twist: [Scalar; 2],
+    swing: LimitPart,
+    twist: LimitPart,
     /// The motor's angular impulse.
     motor: Vector,
 }
 
 impl JointImpulses for SphericalJointSolverData {
     fn impulses(&self) -> (Vector, AngularVector, Scalar) {
-        let angular = self.axes[0] * (self.swing[0] - self.swing[1])
-            + self.axes[1] * (self.twist[0] - self.twist[1])
-            + self.motor;
+        let angular = self.swing.along(self.axes[0]) + self.twist.along(self.axes[1]) + self.motor;
         (self.point.impulse, angular, self.motor.length())
     }
 }
@@ -90,6 +86,10 @@ impl SphericalJoint {
         pass: &Pass,
     ) {
         let motor = &self.motor;
+        if !motor.enabled {
+            // A motor turned off no longer pushes, not even from the last substep.
+            data.motor = Default::default();
+        }
         let i = bodies.i1 + bodies.i2;
         let Some(soft) = motor
             .enabled
@@ -135,12 +135,7 @@ impl SoftJoint for SphericalJoint {
         let (cones, frames) = self.now(data, &bodies);
         let swing = Self::swing(cones).map_or(Vector::ZERO, |s| s.0);
         let twist = Self::twist(cones, frames).map_or(Vector::ZERO, |t| t.0);
-        bodies.turn(
-            (swing * (data.swing[0] - data.swing[1])
-                + twist * (data.twist[0] - data.twist[1])
-                + data.motor)
-                * pass.warm,
-        );
+        bodies.turn((data.swing.along(swing) + data.twist.along(twist) + data.motor) * pass.warm);
     }
 
     fn solve(&self, mut bodies: Bodies, data: &mut Self::SolverData, pass: &Pass) {
@@ -152,24 +147,16 @@ impl SoftJoint for SphericalJoint {
         match (self.swing_limit, Self::swing(cones)) {
             (Some(limit), Some((axis, angle))) => {
                 data.axes[0] = axis;
-                angle_limit(
-                    &mut bodies,
-                    &mut data.swing,
-                    limit,
-                    angle,
-                    axis,
-                    self.swing_compliance,
-                    pass,
-                );
+                data.swing
+                    .solve(&mut bodies, limit, angle, axis, self.swing_compliance, pass);
             }
-            _ => data.swing = [0.0; 2],
+            _ => data.swing = default(),
         }
         match (self.twist_limit, Self::twist(cones, frames)) {
             (Some(limit), Some((gradient, angle))) => {
                 data.axes[1] = gradient;
-                angle_limit(
+                data.twist.solve(
                     &mut bodies,
-                    &mut data.twist,
                     limit,
                     angle,
                     gradient,
@@ -177,7 +164,7 @@ impl SoftJoint for SphericalJoint {
                     pass,
                 );
             }
-            _ => data.twist = [0.0; 2],
+            _ => data.twist = default(),
         }
 
         data.point.solve(&mut bodies, self.point_compliance, pass);

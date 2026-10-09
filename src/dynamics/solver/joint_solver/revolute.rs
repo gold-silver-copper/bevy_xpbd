@@ -19,15 +19,14 @@ pub struct RevoluteJointSolverData {
     /// The impulse keeping the hinge axes aligned.
     #[cfg(feature = "3d")]
     align: Vector,
-    /// The impulses of the lower and upper limits.
-    limit: [Scalar; 2],
+    limit: LimitPart,
     /// The motor's impulse.
     motor: Scalar,
 }
 
 impl JointImpulses for RevoluteJointSolverData {
     fn impulses(&self) -> (Vector, AngularVector, Scalar) {
-        let axial = self.motor + self.limit[0] - self.limit[1];
+        let axial = self.motor + self.limit.net();
         #[cfg(feature = "2d")]
         let angular = axial;
         #[cfg(feature = "3d")]
@@ -91,7 +90,7 @@ impl SoftJoint for RevoluteJoint {
     fn warm_start(&self, mut bodies: Bodies, data: &mut Self::SolverData, pass: &Pass) {
         data.point.warm_start(&mut bodies, pass);
         let (axis, _) = data.hinge(&bodies);
-        let axial = data.motor + data.limit[0] - data.limit[1];
+        let axial = data.motor + data.limit.net();
         #[cfg(feature = "3d")]
         bodies.turn(data.align * pass.warm);
         bodies.turn(axis * axial * pass.warm);
@@ -107,6 +106,10 @@ impl SoftJoint for RevoluteJoint {
         // The motor first, the limits and the hinge after it, which take priority.
         let k = bodies.inv_mass_about(axis);
         let motor = &self.motor;
+        if !motor.enabled {
+            // A motor turned off no longer pushes, not even from the last substep.
+            data.motor = Default::default();
+        }
         if let (true, Some(soft)) = (
             motor.enabled && k > Scalar::EPSILON,
             motor_softness(motor.motor_model, k, pass.h),
@@ -121,16 +124,12 @@ impl SoftJoint for RevoluteJoint {
             data.motor = new;
         }
 
-        if let Some(limit) = self.angle_limit {
-            angle_limit(
-                &mut bodies,
-                &mut data.limit,
-                limit,
-                angle,
-                axis,
-                self.limit_compliance,
-                pass,
-            );
+        match self.angle_limit {
+            Some(limit) => {
+                data.limit
+                    .solve(&mut bodies, limit, angle, axis, self.limit_compliance, pass)
+            }
+            None => data.limit = default(),
         }
 
         #[cfg(feature = "3d")]
