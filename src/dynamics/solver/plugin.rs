@@ -35,8 +35,10 @@ use crate::math::SymmetricTensor;
 /// [Speculative collision](dynamics::ccd#speculative-collision) is used by default to prevent tunneling.
 /// Optional [sweep-based Continuous Collision Detection (CCD)](dynamics::ccd#swept-ccd) is handled by the [`CcdPlugin`].
 ///
-/// [Joints](dynamics::joints) and user constraints are currently solved using [Extended Position-Based Dynamics (XPBD)](super::xpbd)
-/// if the `xpbd_joints` feature is enabled. In the future, they may transition to an impulse-based approach as well.
+/// The fixed, revolute and spherical [joints](dynamics::joints) are solved with the contacts, as soft
+/// impulse constraints, by the [`JointSolverPlugin`](super::joint_solver::JointSolverPlugin).
+/// Prismatic and distance joints and user constraints are solved using [Extended Position-Based Dynamics (XPBD)](super::xpbd)
+/// if the `xpbd_joints` feature is enabled.
 ///
 /// ## Solver Bodies
 ///
@@ -66,8 +68,8 @@ use crate::math::SymmetricTensor;
 /// 6. [Write back solver body data to rigid bodies](SolverSystems::Finalize)
 /// 7. [Store contact impulses for next frame's warm starting](SolverSystems::StoreContactImpulses)
 ///
-/// If the `xpbd_joints` feature is enabled, the [`XpbdSolverPlugin`] can also be added to solve joints
-/// using Extended Position-Based Dynamics (XPBD).
+/// If the `xpbd_joints` feature is enabled, the [`XpbdSolverPlugin`] can also be added to solve prismatic
+/// and distance joints using Extended Position-Based Dynamics (XPBD).
 pub struct SolverPlugin {
     length_unit: Scalar,
 }
@@ -315,6 +317,8 @@ pub struct ContactSoftnessCoefficients {
     pub dynamic: SoftnessCoefficients,
     /// The [`SoftnessCoefficients`] used for contacts against static or kinematic bodies.
     pub non_dynamic: SoftnessCoefficients,
+    /// The [`SoftnessCoefficients`] used for the rigid parts of joints.
+    pub joint: SoftnessCoefficients,
 }
 
 impl Default for ContactSoftnessCoefficients {
@@ -322,9 +326,14 @@ impl Default for ContactSoftnessCoefficients {
         Self {
             dynamic: SoftnessParameters::new(10.0, 30.0).compute_coefficients(1.0 / 60.0),
             non_dynamic: SoftnessParameters::new(10.0, 60.0).compute_coefficients(1.0 / 60.0),
+            joint: SoftnessParameters::new(JOINT_DAMPING_RATIO, 60.0)
+                .compute_coefficients(1.0 / 60.0),
         }
     }
 }
+
+/// The damping ratio of the rigid parts of joints (as in `Box2D`).
+const JOINT_DAMPING_RATIO: Scalar = 2.0;
 
 fn update_contact_softness(
     mut coefficients: ResMut<ContactSoftnessCoefficients>,
@@ -349,6 +358,10 @@ fn update_contact_softness(
         coefficients.non_dynamic =
             SoftnessParameters::new(solver_config.contact_damping_ratio, 2.0 * hz)
                 .compute_coefficients(h);
+
+        // Joints are as stiff as the contacts against static bodies, as in Box2D.
+        coefficients.joint =
+            SoftnessParameters::new(JOINT_DAMPING_RATIO, 2.0 * hz).compute_coefficients(h);
     }
 }
 
@@ -453,7 +466,7 @@ fn prepare_contact_constraints(
 /// Warm starts the solver by applying the impulses from the previous frame or substep.
 ///
 /// See [`SubstepSolverSystems::WarmStart`] for more information.
-fn warm_start(
+pub(super) fn warm_start(
     bodies: Query<(&mut SolverBody, &SolverBodyInertia)>,
     mut constraint_graph: ResMut<ConstraintGraph>,
     solver_config: Res<SolverConfig>,
@@ -531,7 +544,7 @@ fn warm_start_internal(
 /// See [`SubstepSolverSystems::SolveConstraints`] and [`SubstepSolverSystems::Relax`] for more information.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::type_complexity)]
-fn solve_contacts<const USE_BIAS: bool>(
+pub(super) fn solve_contacts<const USE_BIAS: bool>(
     bodies: Query<(&mut SolverBody, &SolverBodyInertia)>,
     mut constraint_graph: ResMut<ConstraintGraph>,
     solver_config: Res<SolverConfig>,
@@ -819,7 +832,7 @@ pub fn joint_damping<T: Component + EntityConstraint<2>>(
 
 /// Inverts a summed inverse inertia on its non-zero axes, so a locked axis doesn't zero the whole inverse.
 #[cfg(feature = "3d")]
-fn inverse_on_free_axes(inv_inertia: SymmetricTensor) -> SymmetricTensor {
+pub(super) fn inverse_on_free_axes(inv_inertia: SymmetricTensor) -> SymmetricTensor {
     let locked = SymmetricTensor::from_diagonal(Vector::select(
         inv_inertia.diagonal().cmpeq(Vector::ZERO),
         Vector::ONE,
