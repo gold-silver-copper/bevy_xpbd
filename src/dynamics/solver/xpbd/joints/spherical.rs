@@ -125,9 +125,11 @@ impl XpbdConstraint<2> for SphericalJoint {
     }
 }
 
-/// The length of the swing axes' bisector below which the twist is not limited: the swing is
-/// within some 6 degrees of a half turn, where the twist about the bisector has no meaning.
-const TWIST_UNDEFINED_BISECTOR: Scalar = 0.1;
+/// The length of the swing axes' bisector below which the twist is not limited: past some 150
+/// degrees of swing, where a twist reference's projection across the bisector has shrunk to a
+/// quarter of its length and the measured twist swings wildly as the swing changes (a joint
+/// flung through a half turn was thrown, its twist corrected toward a value that jumped).
+const TWIST_UNDEFINED_BISECTOR: Scalar = 0.5;
 
 impl SphericalJoint {
     /// Applies the motor's torque, driving the second frame's rotation relative to the first
@@ -269,9 +271,10 @@ impl SphericalJoint {
             let a2 = body2.delta_rotation * solver_data.swing_axis2;
 
             // The twist is measured about the bisector of the two swing axes, which is undefined
-            // only when the swing is a half turn. Short of that the limit holds at any swing:
-            // a limit that let go past some swing would let the twist run on unchecked there,
-            // then correct all of it at once as the swing came back, out of no stored energy.
+            // when the swing is a half turn and ill-conditioned near it. Short of that the limit
+            // holds at any swing: a limit that let go at 120 degrees (as the XPBD paper's
+            // clamp did) let the twist run on unchecked past it, then corrected all of it at
+            // once as the swing came back, out of no stored energy.
             let n = a1 + a2;
             let n_magnitude = n.length();
 
