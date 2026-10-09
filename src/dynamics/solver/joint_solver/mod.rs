@@ -120,7 +120,7 @@ pub struct Pass {
     pub h: Scalar,
     /// The softness of a rigid part: a contact's against a static body, twice as stiff as one
     /// between dynamic bodies, as `Box2D` has its joints, but damped as the contacts are (at
-    /// Box2D's twice critical damping, joints held looser than the contacts pressing on them
+    /// `Box2D`'s twice critical damping, joints held looser than the contacts pressing on them
     /// let a fallen rider's legs end up under its motorcycle).
     pub rigid: SoftnessCoefficients,
     /// Whether the rigid parts correct their error (the solve pass) or only their speed (relax).
