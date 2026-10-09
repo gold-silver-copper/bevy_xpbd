@@ -14,8 +14,12 @@ use crate::{
 };
 use bevy::{
     ecs::{
-        component::ComponentId, entity_disabling::Disabled, lifecycle::HookContext,
-        query::QueryFilter, world::DeferredWorld,
+        component::{ComponentId, ComponentIdFor},
+        entity_disabling::Disabled,
+        event::EntityComponentsTrigger,
+        lifecycle::HookContext,
+        query::QueryFilter,
+        world::DeferredWorld,
     },
     prelude::*,
 };
@@ -126,16 +130,27 @@ impl JointComponentId {
 
 fn add_joint_to_graph<
     T: Component + EntityConstraint<2>,
-    E: EventPattern<Event: EntityEvent>,
+    E: EventPattern<Event: for<'a> EntityEvent<Trigger<'a> = EntityComponentsTrigger<'a>>>,
     F: QueryFilter,
 >(
     trigger: On<E>,
+    joint_id: ComponentIdFor<T>,
     query: Query<(&T, Has<JointCollisionDisabled>), F>,
     mut joint_graph: ResMut<JointGraph>,
     mut joint_graph_changes: MessageWriter<JointGraphChange>,
     #[cfg(feature = "xpbd_joints")] mut commands: Commands,
 ) {
     let entity = trigger.event_target();
+
+    // Removing `JointDisabled` or `Disabled` by despawning the joint doesn't enable it:
+    // the joint goes too, and its bodies may already be gone.
+    let keeps_joint = trigger
+        .trigger()
+        .new_archetype
+        .is_some_and(|archetype| archetype.contains(joint_id.get()));
+    if !keeps_joint {
+        return;
+    }
 
     let Ok((joint, collision_disabled)) = query.get(entity) else {
         return;
