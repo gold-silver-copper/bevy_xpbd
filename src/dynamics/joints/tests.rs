@@ -4,7 +4,7 @@ use core::time::Duration;
 use approx::assert_relative_eq;
 use bevy::{mesh::MeshPlugin, prelude::*, time::TimeUpdateStrategy};
 
-use crate::prelude::*;
+use crate::{dynamics::solver::joint_graph::JointGraph, prelude::*};
 
 const TIMESTEP: f32 = 1.0 / 64.0;
 
@@ -850,4 +850,58 @@ fn prismatic_motor_combined_position_velocity() {
         "Combined motor should move the body: {}",
         displacement
     );
+}
+
+/// Spawns two dynamic bodies and a disabled revolute joint between them, and runs a step.
+fn disabled_joint_app() -> (App, [Entity; 2], Entity) {
+    let mut app = create_app();
+    app.finish();
+
+    let mut body = |x: Scalar| {
+        app.world_mut()
+            .spawn((
+                RigidBody::Dynamic,
+                Position(Vector::X * x),
+                Mass(1.0),
+                #[cfg(feature = "2d")]
+                AngularInertia(1.0),
+                #[cfg(feature = "3d")]
+                AngularInertia::new(Vec3::splat(1.0)),
+            ))
+            .id()
+    };
+    let bodies = [body(0.0), body(1.0)];
+    let joint = app
+        .world_mut()
+        .spawn((RevoluteJoint::new(bodies[0], bodies[1]), JointDisabled))
+        .id();
+
+    app.update();
+    (app, bodies, joint)
+}
+
+/// Tests that despawning a disabled joint after both of its bodies doesn't panic.
+#[test]
+fn disabled_joint_despawned_after_its_bodies() {
+    let (mut app, bodies, joint) = disabled_joint_app();
+
+    for body in bodies {
+        app.world_mut().despawn(body);
+    }
+    app.world_mut().despawn(joint);
+    app.update();
+
+    assert!(app.world().resource::<JointGraph>().get(joint).is_none());
+}
+
+/// Tests that enabling a disabled joint still puts it in the joint graph.
+#[test]
+fn enabled_joint_joins_the_joint_graph() {
+    let (mut app, _, joint) = disabled_joint_app();
+    assert!(app.world().resource::<JointGraph>().get(joint).is_none());
+
+    app.world_mut().entity_mut(joint).remove::<JointDisabled>();
+    app.update();
+
+    assert!(app.world().resource::<JointGraph>().get(joint).is_some());
 }
