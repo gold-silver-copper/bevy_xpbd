@@ -417,8 +417,14 @@ impl PointPart {
         bodies.push(r1, r2, self.impulse * pass.warm);
     }
 
-    /// Holds the anchors together, with no more than `most` force (N).
-    pub fn solve(&mut self, bodies: &mut Bodies, (compliance, most): (f32, f32), pass: &Pass) {
+    /// Holds the anchors together, with no more force (N) than `most` along each of the axes of
+    /// `frame` (the world's rotation of the frame it is read in).
+    pub fn solve(
+        &mut self,
+        bodies: &mut Bodies,
+        (compliance, frame, most): (f32, Rotation, Vector),
+        pass: &Pass,
+    ) {
         let (r1, r2) = self.anchors(bodies);
         let k = point_inv_mass(bodies, r1, r2);
         let separation =
@@ -434,7 +440,8 @@ impl PointPart {
         let velocity = bodies.b2.velocity_at_point(r2) - bodies.b1.velocity_at_point(r1);
         let impulse = -mass_scale * (k.inverse_or_zero() * (velocity + bias * separation))
             - impulse_scale * self.impulse;
-        let new = (self.impulse + impulse).clamp_length_max(most * pass.h);
+        let held = frame.inverse() * (self.impulse + impulse);
+        let new = frame * held.clamp(-most * pass.h, most * pass.h);
         bodies.push(r1, r2, new - self.impulse);
         self.impulse = new;
     }
