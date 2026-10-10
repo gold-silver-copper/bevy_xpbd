@@ -1432,6 +1432,46 @@ fn revolute_limit_pressed_past_holds_its_side() {
     );
 }
 
+/// Tests that a joint's forces are the step's: a body going at 1 m/s stopped by a fixed joint to a
+/// static body, what its forces add up to over the steps is the momentum it took.
+#[test]
+fn joint_forces_add_up_to_the_momentum_taken() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let going = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            LinearVelocity(Vector::X),
+            Mass(1.0),
+            #[cfg(feature = "2d")]
+            AngularInertia(1.0),
+            #[cfg(feature = "3d")]
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let joint = app
+        .world_mut()
+        .spawn((FixedJoint::new(anchor, going), JointForces::new()))
+        .id();
+
+    let mut taken = Vector::ZERO;
+    for _ in 0..(1.0 / TIMESTEP) as usize {
+        app.update();
+        taken += app.world().entity(joint).get::<JointForces>().unwrap().force() * TIMESTEP;
+    }
+    assert!(
+        (taken.x + 1.0).abs() < 0.02,
+        "its forces took {taken} N·s of the 1 N·s"
+    );
+}
+
 /// Tests that a hinge turned about in the world keeps no push about its own axis from holding its
 /// axes aligned: the align impulse taken as the bodies' spin across the hinge was stopped, the
 /// hinge then carried round by a spin about another axis, a weak motor still holds its angle.

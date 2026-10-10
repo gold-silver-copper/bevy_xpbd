@@ -50,6 +50,7 @@ impl Plugin for JointSolverPlugin {
         app.register_required_components::<RevoluteJoint, RevoluteJointSolverData>();
         #[cfg(feature = "3d")]
         app.register_required_components::<SphericalJoint, SphericalJointSolverData>();
+        app.register_required_components::<JointForces, StepImpulses>();
 
         app.add_systems(
             PhysicsSchedule,
@@ -142,6 +143,18 @@ pub trait SoftJoint: Component + EntityConstraint<2> {
 
     /// Applies the impulses the joint needs now.
     fn solve(&self, bodies: Bodies, data: &mut Self::SolverData, pass: &Pass);
+}
+
+/// What a joint's impulses came to over the step's substeps, for its [`JointForces`]: their mean
+/// is the step's force. (The last substep's alone read a crash's stop, met in a substep or two,
+/// as many times the step's.)
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[reflect(Component, Debug, PartialEq)]
+pub struct StepImpulses {
+    /// The sums of the substeps' linear, angular and motor impulses (N·s, N·m·s).
+    pub sum: (Vector, AngularVector, Scalar),
+    /// The substeps summed.
+    pub substeps: u32,
 }
 
 /// A joint's last impulses, read as forces.
@@ -479,9 +492,20 @@ fn with_bodies(
 /// so that it starts afresh when it is enabled again.
 fn prepare<J: SoftJoint>(
     bodies: Query<RigidBodyQueryReadOnly, Without<RigidBodyDisabled>>,
-    mut joints: Query<(&J, &mut J::SolverData, Has<JointDisabled>), Without<RigidBody>>,
+    mut joints: Query<
+        (
+            &J,
+            &mut J::SolverData,
+            Has<JointDisabled>,
+            Option<&mut StepImpulses>,
+        ),
+        Without<RigidBody>,
+    >,
 ) {
-    for (joint, mut data, disabled) in &mut joints {
+    for (joint, mut data, disabled, step) in &mut joints {
+        if let Some(mut step) = step {
+            *step = default();
+        }
         if disabled {
             *data = default();
         } else if let Ok([body1, body2]) = bodies.get_many(joint.entities()) {
@@ -513,7 +537,10 @@ impl Stage for Relaxed {
 
 fn solve<J: SoftJoint, S: Stage>(
     bodies: Query<(&mut SolverBody, &SolverBodyInertia), Without<RigidBodyDisabled>>,
-    mut joints: Query<(&J, &mut J::SolverData), (Without<RigidBody>, Without<JointDisabled>)>,
+    mut joints: Query<
+        (&J, &mut J::SolverData, Option<&mut StepImpulses>),
+        (Without<RigidBody>, Without<JointDisabled>),
+    >,
     time: Res<Time>,
     softness: Res<ContactSoftnessCoefficients>,
     config: Res<SolverConfig>,
@@ -524,7 +551,7 @@ fn solve<J: SoftJoint, S: Stage>(
         use_bias: S::BIAS,
         warm: config.warm_start_coefficient,
     };
-    for (joint, mut data) in &mut joints {
+    for (joint, mut data, step) in &mut joints {
         with_bodies(&bodies, joint.entities(), |bodies| {
             if S::WARM {
                 joint.warm_start(bodies, &mut data, &pass);
@@ -532,19 +559,30 @@ fn solve<J: SoftJoint, S: Stage>(
                 joint.solve(bodies, &mut data, &pass);
             }
         });
+        // The substep's impulses are final once relaxed.
+        if let (true, Some(mut step)) = (!S::WARM && !S::BIAS, step) {
+            let (linear, angular, motor) = data.impulses();
+            step.sum = (
+                step.sum.0 + linear,
+                step.sum.1 + angular,
+                step.sum.2 + motor,
+            );
+            step.substeps += 1;
+        }
     }
 }
 
-/// Writes each joint's last impulses as forces.
+/// Writes each joint's mean impulses over the step as forces.
 fn write_forces<J: SoftJoint>(
-    mut joints: Query<(&J::SolverData, &mut JointForces), With<J>>,
+    mut joints: Query<(&StepImpulses, &mut JointForces), With<J>>,
     time: Res<Time<Substeps>>,
 ) {
     let h = time.delta_secs_f64() as Scalar;
-    for (data, mut forces) in &mut joints {
-        let (linear, angular, motor) = data.impulses();
-        forces.set_force(linear / h);
-        forces.set_torque(angular / h);
-        forces.set_motor_force(motor / h);
+    for (step, mut forces) in &mut joints {
+        let per = 1.0 / (h * step.substeps.max(1) as Scalar);
+        let (linear, angular, motor) = step.sum;
+        forces.set_force(linear * per);
+        forces.set_torque(angular * per);
+        forces.set_motor_force(motor * per);
     }
 }
