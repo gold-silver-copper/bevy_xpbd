@@ -16,9 +16,13 @@ pub struct RevoluteJointSolverData {
     /// The hinge axis as last solved.
     #[cfg(feature = "3d")]
     axis: Vector,
-    /// The impulse keeping the hinge axes aligned.
+    /// The impulse keeping the hinge axes aligned, along the two directions across the first
+    /// body's hinge axis ([`across`](Self::across)): it turns with the first body, so that as
+    /// the hinge turns in the world no part of it comes to lie along the axis, where no row
+    /// takes it back (held as a world vector, a hinge turned about by its body's spin kept a
+    /// stale push about its own axis, as strong as the elbow's drive, against it).
     #[cfg(feature = "3d")]
-    align: Vector,
+    align: Vec2,
     limit: LimitPart,
     /// The motor's impulse.
     motor: f32,
@@ -30,7 +34,10 @@ impl JointImpulses for RevoluteJointSolverData {
         #[cfg(feature = "2d")]
         let angular = axial;
         #[cfg(feature = "3d")]
-        let angular = self.align + self.axis * axial;
+        let angular = {
+            let across = self.axes[2];
+            across * self.align.x + self.axes[0].cross(across) * self.align.y + self.axis * axial
+        };
         (self.point.impulse, angular, self.motor.abs())
     }
 }
@@ -54,6 +61,14 @@ impl RevoluteJointSolverData {
             let b2 = bodies.b2.delta_rotation * self.axes[3];
             (a1, b1.cross(b2).dot(a1).atan2(b1.dot(b2)))
         }
+    }
+
+    /// The two directions across the hinge axis (3D), on the first body: the hinge's reference
+    /// across it and the axis's cross product with it.
+    #[cfg(feature = "3d")]
+    fn across(&self, bodies: &Bodies, axis: Vector) -> [Vector; 2] {
+        let b1 = bodies.b1.delta_rotation * self.axes[2];
+        [b1, axis.cross(b1)]
     }
 }
 
@@ -92,7 +107,10 @@ impl SoftJoint for RevoluteJoint {
         let (axis, _) = data.hinge(&bodies);
         let axial = data.motor + data.limit.net();
         #[cfg(feature = "3d")]
-        bodies.turn(data.align * pass.warm);
+        {
+            let [x, y] = data.across(&bodies, axis);
+            bodies.turn((x * data.align.x + y * data.align.y) * pass.warm);
+        }
         bodies.turn(axis * axial * pass.warm);
     }
 
@@ -136,8 +154,7 @@ impl SoftJoint for RevoluteJoint {
         {
             // The hinge axes held together: the turn across the first's axis.
             let a2 = bodies.b2.delta_rotation * data.axes[1];
-            let b1 = bodies.b1.delta_rotation * data.axes[2];
-            let across = [b1, axis.cross(b1)];
+            let across = data.across(&bodies, axis);
             let i = bodies.i1 + bodies.i2;
             let k = Mat2::from_cols(
                 Vec2::new(across[0].dot(i * across[0]), across[1].dot(i * across[0])),
@@ -149,10 +166,9 @@ impl SoftJoint for RevoluteJoint {
             let spin = bodies.spin();
             let along = |v: Vector| Vec2::new(across[0].dot(v), across[1].dot(v));
             let impulse = -mass_scale * (k.inverse_or_zero() * (along(spin) + bias * along(error)))
-                - impulse_scale * along(data.align);
-            let impulse = across[0] * impulse.x + across[1] * impulse.y;
+                - impulse_scale * data.align;
             data.align += impulse;
-            bodies.turn(impulse);
+            bodies.turn(across[0] * impulse.x + across[1] * impulse.y);
         }
 
         data.point.solve(&mut bodies, self.point_compliance, pass);
