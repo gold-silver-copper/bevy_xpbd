@@ -1466,8 +1466,9 @@ fn joint_forces_add_up_to_the_momentum_taken() {
         app.update();
         taken += app.world().entity(joint).get::<JointForces>().unwrap().force() * TIMESTEP;
     }
+    // The forces are on the first body, the static one: the body's push on it.
     assert!(
-        (taken.x + 1.0).abs() < 0.02,
+        (taken.x - 1.0).abs() < 0.02,
         "its forces took {taken} N·s of the 1 N·s"
     );
 }
