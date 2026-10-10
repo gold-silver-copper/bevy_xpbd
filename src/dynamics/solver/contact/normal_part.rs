@@ -112,7 +112,9 @@ impl ContactNormalPart {
     }
 
     /// Solves the non-penetration constraint, updating the total impulse in `self` and returning
-    /// the incremental impulse to apply to each body.
+    /// the incremental impulse to apply to each body, the accumulated impulse held within
+    /// `max_impulse`, and whether it was held there (the contact gave).
+    #[allow(clippy::too_many_arguments)]
     pub fn solve_impulse(
         &mut self,
         separation: Scalar,
@@ -121,7 +123,8 @@ impl ContactNormalPart {
         use_bias: bool,
         max_overlap_solve_speed: Scalar,
         delta_secs: Scalar,
-    ) -> Scalar {
+        max_impulse: Scalar,
+    ) -> (Scalar, bool) {
         // Compute the relative velocity along the normal.
         let normal_speed = relative_velocity.dot(normal);
 
@@ -156,12 +159,13 @@ impl ContactNormalPart {
         };
 
         // Clamp the accumulated impulse.
-        let new_impulse = (self.impulse + impulse).max(0.0);
+        let wanted = (self.impulse + impulse).max(0.0);
+        let new_impulse = wanted.min(max_impulse.max(0.0));
         impulse = new_impulse - self.impulse;
         self.impulse = new_impulse;
         self.total_impulse += new_impulse;
 
         // Return the clamped incremental normal impulse.
-        impulse
+        (impulse, wanted > new_impulse)
     }
 }
