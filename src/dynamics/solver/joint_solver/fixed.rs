@@ -84,6 +84,6 @@ impl SoftJoint for FixedJoint {
         data.angular += impulse;
         bodies.turn(impulse);
 
-        data.point.solve(&mut bodies, self.point_compliance, pass);
+        data.point.solve(&mut bodies, (self.point_compliance, self.max_force), pass);
     }
 }
