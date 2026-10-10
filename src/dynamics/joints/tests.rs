@@ -1670,3 +1670,69 @@ fn limbs_lying_against_their_limits_sleep() {
         );
     }
 }
+
+/// Tests that a hinge's and a ball joint's motor turned off pushes no more, not even once from
+/// its last substep's impulse: a body its motor turned at its most torque goes on turning as it
+/// was the step after it is turned off.
+#[test]
+#[cfg(feature = "3d")]
+fn a_motor_turned_off_pushes_no_more() {
+    for ball in [false, true] {
+        let mut app = create_app();
+        app.finish();
+
+        let anchor = app
+            .world_mut()
+            .spawn((RigidBody::Static, Position(Vector::ZERO)))
+            .id();
+        let body = app
+            .world_mut()
+            .spawn((
+                RigidBody::Dynamic,
+                Position(Vector::ZERO),
+                Mass(1.0),
+                AngularInertia::new(Vec3::splat(1.0)),
+            ))
+            .id();
+        let model = MotorModel::SpringDamper {
+            frequency: 2.0,
+            damping_ratio: 1.0,
+        };
+        let joint = if ball {
+            let motor = SphericalMotor::new(model)
+                .with_target_rotation(Quaternion::from_rotation_z(1.0))
+                .with_max_torque(0.5);
+            app.world_mut()
+                .spawn(SphericalJoint::new(anchor, body).with_motor(motor))
+                .id()
+        } else {
+            let motor = AngularMotor::new(model)
+                .with_target_position(1.0)
+                .with_max_torque(0.5);
+            app.world_mut()
+                .spawn(RevoluteJoint::new(anchor, body).with_motor(motor))
+                .id()
+        };
+
+        app.update();
+        for _ in 0..(0.5 / TIMESTEP) as usize {
+            app.update();
+        }
+        let mut joint = app.world_mut().entity_mut(joint);
+        if ball {
+            joint.get_mut::<SphericalJoint>().unwrap().motor.enabled = false;
+        } else {
+            joint.get_mut::<RevoluteJoint>().unwrap().motor.enabled = false;
+        }
+        let spin = |app: &App| app.world().entity(body).get::<AngularVelocity>().unwrap().0;
+        let before = spin(&app);
+        app.update();
+        let after = spin(&app);
+        assert!(before.z > 0.1, "the motor turned it at {before}");
+        assert!(
+            after.distance(before) < 1e-5,
+            "turned off, it changed its spin by {} rad/s",
+            after.distance(before)
+        );
+    }
+}
