@@ -1432,6 +1432,55 @@ fn revolute_limit_pressed_past_holds_its_side() {
     );
 }
 
+/// Tests that a hinge turned about in the world keeps no push about its own axis from holding its
+/// axes aligned: the align impulse taken as the bodies' spin across the hinge was stopped, the
+/// hinge then carried round by a spin about another axis, a weak motor still holds its angle.
+#[test]
+#[cfg(feature = "3d")]
+fn revolute_turned_about_keeps_its_angle() {
+    let mut app = create_app();
+    app.finish();
+
+    let first = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            AngularVelocity(Vector::X * 3.0),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let second = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            AngularVelocity(Vector::new(3.0, 6.0, 0.0)),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let joint = RevoluteJoint::new(first, second).with_motor(
+        AngularMotor::new(MotorModel::SpringDamper {
+            frequency: 2.0,
+            damping_ratio: 1.0,
+        })
+        .with_max_torque(0.5),
+    );
+    app.world_mut().spawn(joint);
+
+    app.update();
+    for _ in 0..(1.0 / TIMESTEP) as usize {
+        app.update();
+    }
+
+    let turn = |e: Entity| app.world().entity(e).get::<Rotation>().unwrap().0;
+    let relative = turn(first).inverse() * turn(second);
+    let angle = 2.0 * relative.z.atan2(relative.w);
+    assert!(angle.abs() < 0.1, "the hinge went to {angle} rad");
+}
+
 /// Tests that a body swinging and twisting against a spherical joint's swing and twist limits
 /// gains no energy from them.
 #[test]
