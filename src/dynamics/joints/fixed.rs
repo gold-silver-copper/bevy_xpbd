@@ -47,6 +47,10 @@ pub struct FixedJoint {
     pub point_compliance: f32,
     /// The compliance of the angular constraint (inverse of stiffness, N * m / rad).
     pub angle_compliance: f32,
+    /// The most force the point-to-point constraint holds with (N; infinite by default): past
+    /// it the joint gives, its bodies going on apart, slowed by that force (a hold, a weld or a
+    /// bolt that gives way, against what pins one body while the other is pulled on).
+    pub max_force: f32,
 }
 
 impl EntityConstraint<2> for FixedJoint {
@@ -66,7 +70,16 @@ impl FixedJoint {
             frame2: JointFrame::IDENTITY,
             point_compliance: 0.0,
             angle_compliance: 0.0,
+            max_force: f32::INFINITY,
         }
+    }
+
+    /// Sets the most force the point-to-point constraint holds with (see
+    /// [`max_force`](Self::max_force)).
+    #[inline]
+    pub const fn with_max_force(mut self, max_force: f32) -> Self {
+        self.max_force = max_force;
+        self
     }
 
     /// Sets the local [`JointFrame`] of the first body, configuring both the [`JointAnchor`] and [`JointBasis`].

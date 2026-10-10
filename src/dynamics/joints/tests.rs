@@ -1460,6 +1460,41 @@ fn joint_forces_add_up_to_the_momentum_taken() {
     );
 }
 
+/// Tests that a fixed joint holds with no more than its most force: a 1 kg body going at 1 m/s from
+/// a static body it is joined to by a joint of 2 N goes on, slowed at 2 m/s².
+#[test]
+fn fixed_joint_gives_past_its_most_force() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let going = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            LinearVelocity(Vector::X),
+            Mass(1.0),
+            #[cfg(feature = "2d")]
+            AngularInertia(1.0),
+            #[cfg(feature = "3d")]
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(FixedJoint::new(anchor, going).with_max_force(2.0));
+
+    app.update();
+    for _ in 0..(0.25 / TIMESTEP) as usize {
+        app.update();
+    }
+    let v = app.world().entity(going).get::<LinearVelocity>().unwrap().0.x;
+    assert!((v - 0.5).abs() < 0.05, "it goes at {v} m/s");
+}
+
 /// Tests that a hinge turned about in the world keeps no push about its own axis from holding its
 /// axes aligned: the align impulse taken as the bodies' spin across the hinge was stopped, the
 /// hinge then carried round by a spin about another axis, a weak motor still holds its angle.
