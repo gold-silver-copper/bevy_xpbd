@@ -1432,6 +1432,131 @@ fn revolute_limit_pressed_past_holds_its_side() {
     );
 }
 
+/// Tests that a joint's forces are the step's: a body going at 1 m/s stopped by a fixed joint to a
+/// static body, what its forces add up to over the steps is the momentum it took.
+#[test]
+fn joint_forces_add_up_to_the_momentum_taken() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let going = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            LinearVelocity(Vector::X),
+            Mass(1.0),
+            #[cfg(feature = "2d")]
+            AngularInertia(1.0),
+            #[cfg(feature = "3d")]
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let joint = app
+        .world_mut()
+        .spawn((FixedJoint::new(anchor, going), JointForces::new()))
+        .id();
+
+    let mut taken = Vector::ZERO;
+    for _ in 0..(1.0 / TIMESTEP) as usize {
+        app.update();
+        taken += app.world().entity(joint).get::<JointForces>().unwrap().force() * TIMESTEP;
+    }
+    // The forces are on the first body, the static one: the body's push on it.
+    assert!(
+        (taken.x - 1.0).abs() < 0.02,
+        "its forces took {taken} N·s of the 1 N·s"
+    );
+}
+
+/// Tests that a fixed joint holds with no more than its most force: a 1 kg body going at 1 m/s from
+/// a static body it is joined to by a joint of 2 N goes on, slowed at 2 m/s².
+#[test]
+fn fixed_joint_gives_past_its_most_force() {
+    let mut app = create_app();
+    app.finish();
+
+    let anchor = app
+        .world_mut()
+        .spawn((RigidBody::Static, Position(Vector::ZERO)))
+        .id();
+    let going = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            LinearVelocity(Vector::X),
+            Mass(1.0),
+            #[cfg(feature = "2d")]
+            AngularInertia(1.0),
+            #[cfg(feature = "3d")]
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(FixedJoint::new(anchor, going).with_max_force(Vector::splat(2.0)));
+
+    app.update();
+    for _ in 0..(0.25 / TIMESTEP) as usize {
+        app.update();
+    }
+    let v = app.world().entity(going).get::<LinearVelocity>().unwrap().0.x;
+    assert!((v - 0.5).abs() < 0.05, "it goes at {v} m/s");
+}
+
+/// Tests that a hinge turned about in the world keeps no push about its own axis from holding its
+/// axes aligned: the align impulse taken as the bodies' spin across the hinge was stopped, the
+/// hinge then carried round by a spin about another axis, a weak motor still holds its angle.
+#[test]
+#[cfg(feature = "3d")]
+fn revolute_turned_about_keeps_its_angle() {
+    let mut app = create_app();
+    app.finish();
+
+    let first = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            AngularVelocity(Vector::X * 3.0),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let second = app
+        .world_mut()
+        .spawn((
+            RigidBody::Dynamic,
+            Position(Vector::ZERO),
+            AngularVelocity(Vector::new(3.0, 6.0, 0.0)),
+            Mass(1.0),
+            AngularInertia::new(Vec3::splat(1.0)),
+        ))
+        .id();
+    let joint = RevoluteJoint::new(first, second).with_motor(
+        AngularMotor::new(MotorModel::SpringDamper {
+            frequency: 2.0,
+            damping_ratio: 1.0,
+        })
+        .with_max_torque(0.5),
+    );
+    app.world_mut().spawn(joint);
+
+    app.update();
+    for _ in 0..(1.0 / TIMESTEP) as usize {
+        app.update();
+    }
+
+    let turn = |e: Entity| app.world().entity(e).get::<Rotation>().unwrap().0;
+    let relative = turn(first).inverse() * turn(second);
+    let angle = 2.0 * relative.z.atan2(relative.w);
+    assert!(angle.abs() < 0.1, "the hinge went to {angle} rad");
+}
+
 /// Tests that a body swinging and twisting against a spherical joint's swing and twist limits
 /// gains no energy from them.
 #[test]
@@ -1483,4 +1608,65 @@ fn spherical_limits_feed_no_energy() {
         most < start * 1.05,
         "the energy rose from {start} to {most}"
     );
+}
+
+/// Tests that limbs lying on the ground with their joints pressed against their limits come
+/// to rest and fall asleep: joints solved apart from the contacts kept them creeping.
+#[cfg(all(feature = "3d", feature = "default-collider"))]
+#[test]
+fn limbs_lying_against_their_limits_sleep() {
+    let mut app = create_app();
+    app.insert_resource(Gravity(Vector::NEG_Z * 9.81));
+    app.finish();
+
+    let world = app.world_mut();
+    world.spawn((RigidBody::Static, Collider::half_space(Vector::Z)));
+    // Three capsules end to end along x on the ground, the joints between them bent short of
+    // the limits they are held to: a ball whose cone is turned off the line, a hinge about z
+    // that must fold.
+    let limb = |world: &mut World, x: Scalar| {
+        world
+            .spawn((
+                RigidBody::Dynamic,
+                Position(Vector::new(x, 0.0, 0.05)),
+                Collider::capsule_endpoints(
+                    0.05,
+                    Vector::new(-0.2, 0.0, 0.0),
+                    Vector::new(0.2, 0.0, 0.0),
+                ),
+                Friction::new(0.6),
+            ))
+            .id()
+    };
+    let limbs = [limb(world, 0.0), limb(world, 0.4), limb(world, 0.8)];
+    let mut ball = SphericalJoint::new(limbs[0], limbs[1])
+        .with_local_frame1(Isometry::new(
+            Vector::X * 0.2,
+            Quaternion::from_rotation_z(0.6),
+        ))
+        .with_local_frame2(Isometry::new(Vector::NEG_X * 0.2, Quaternion::IDENTITY))
+        .with_twist_axis(Vector::Z);
+    ball.swing_limit = Some(AngleLimit::new(-0.3, 0.3));
+    ball.twist_limit = Some(AngleLimit::new(-0.2, 0.2));
+    (ball.swing_compliance, ball.twist_compliance) = (0.005, 0.005);
+    let hinge = RevoluteJoint::new(limbs[1], limbs[2])
+        .with_local_anchor1(Vector::X * 0.2)
+        .with_local_anchor2(Vector::NEG_X * 0.2)
+        .with_angle_limits(0.4, 1.2)
+        .with_limit_compliance(0.005);
+    world.spawn((ball, JointCollisionDisabled));
+    world.spawn((hinge, JointCollisionDisabled));
+
+    for _ in 0..(6.0 / TIMESTEP) as usize {
+        app.update();
+    }
+    for limb in limbs {
+        let e = app.world().entity(limb);
+        assert!(
+            e.contains::<Sleeping>(),
+            "a limb still moving at {} m/s, {} rad/s",
+            e.get::<LinearVelocity>().unwrap().length(),
+            e.get::<AngularVelocity>().unwrap().length()
+        );
+    }
 }

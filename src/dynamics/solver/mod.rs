@@ -9,6 +9,7 @@ pub mod constraint_graph;
 pub mod contact;
 pub mod islands;
 pub mod joint_graph;
+pub mod joint_solver;
 pub mod schedule;
 pub mod softness_parameters;
 pub mod solver_body;
@@ -19,7 +20,10 @@ mod diagnostics;
 pub use diagnostics::SolverDiagnostics;
 
 use crate::{
-    dynamics::solver::{joint_graph::JointGraphPlugin, solver_body::SolverBodyPlugin},
+    dynamics::solver::{
+        joint_graph::JointGraphPlugin, joint_solver::JointSolverPlugin,
+        solver_body::SolverBodyPlugin,
+    },
     prelude::*,
 };
 use bevy::{app::PluginGroupBuilder, prelude::*};
@@ -40,7 +44,8 @@ use bevy::{app::PluginGroupBuilder, prelude::*};
 /// | [`IslandPlugin`]                  | Manages [simulation islands](dynamics::solver::islands) for sleeping and waking.                                                                           |
 /// | [`IslandSleepingPlugin`]          | Manages sleeping and waking of [simulation islands](dynamics::solver::islands).                                                                            |
 /// | [`JointGraphPlugin`]              | Manages the [`JointGraph`](joint_graph::JointGraph) for each joint type.                                                                                   |
-/// | [`XpbdSolverPlugin`]              | Solves joints using Extended Position-Based Dynamics (XPBD). Requires the `xpbd_joints` feature.                                                           |
+/// | [`JointSolverPlugin`]             | Solves fixed, revolute and spherical joints with the contacts.                                                                                             |
+/// | [`XpbdSolverPlugin`]              | Solves prismatic and distance joints using Extended Position-Based Dynamics (XPBD). Requires the `xpbd_joints` feature.                                      |
 ///
 /// Refer to the documentation of the plugins for more information about their responsibilities and implementations.
 #[derive(Debug, Default)]
@@ -65,6 +70,7 @@ impl PluginGroup for SolverPlugins {
             .add(SolverSchedulePlugin)
             .add(IntegratorPlugin::default())
             .add(SolverPlugin::new_with_length_unit(self.length_unit))
+            .add(JointSolverPlugin)
             .add(CcdPlugin)
             .add(IslandPlugin)
             .add(IslandSleepingPlugin)
