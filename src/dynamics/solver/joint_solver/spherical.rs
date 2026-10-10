@@ -86,10 +86,6 @@ impl SphericalJoint {
         pass: &Pass,
     ) {
         let motor = &self.motor;
-        if !motor.enabled {
-            // A motor turned off no longer pushes, not even from the last substep.
-            data.motor = Default::default();
-        }
         let i = bodies.i1 + bodies.i2;
         let Some(soft) = motor
             .enabled
@@ -145,6 +141,10 @@ impl SoftJoint for SphericalJoint {
     }
 
     fn warm_start(&self, mut bodies: Bodies, data: &mut Self::SolverData, pass: &Pass) {
+        if !self.motor.enabled {
+            // A motor turned off no longer pushes, not even from the last substep.
+            data.motor = Default::default();
+        }
         data.point.warm_start(&mut bodies, pass);
         let (cones, frames) = self.now(data, &bodies);
         let swing = Self::swing(cones).map_or(Vector::ZERO, |s| s.0);

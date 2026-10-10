@@ -103,6 +103,10 @@ impl SoftJoint for RevoluteJoint {
     }
 
     fn warm_start(&self, mut bodies: Bodies, data: &mut Self::SolverData, pass: &Pass) {
+        if !self.motor.enabled {
+            // A motor turned off no longer pushes, not even from the last substep.
+            data.motor = Default::default();
+        }
         data.point.warm_start(&mut bodies, pass);
         let (axis, _) = data.hinge(&bodies);
         let axial = data.motor + data.limit.net();
@@ -124,10 +128,6 @@ impl SoftJoint for RevoluteJoint {
         // The motor first, the limits and the hinge after it, which take priority.
         let k = bodies.inv_mass_about(axis);
         let motor = &self.motor;
-        if !motor.enabled {
-            // A motor turned off no longer pushes, not even from the last substep.
-            data.motor = Default::default();
-        }
         if let (true, Some(soft)) = (
             motor.enabled && k > f32::EPSILON,
             motor_softness(motor.motor_model, k, pass.h),
