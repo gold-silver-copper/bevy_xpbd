@@ -13,7 +13,7 @@ pub struct FixedJointSolverData {
     #[cfg(feature = "3d")]
     rotation: Quat,
     /// The first body's rotation at the start of the step.
-    turn1: Rotation,
+    turn1: Rot,
     /// The impulse holding the frames' rotations together.
     angular: AngularVector,
 }
@@ -38,10 +38,11 @@ impl SoftJoint for FixedJoint {
         };
         data.point.prepare(bodies, [anchor1, anchor2]);
         let [body1, body2] = bodies;
-        data.turn1 = *body1.rotation;
+        data.turn1 = (*body1.rotation).into();
         #[cfg(feature = "2d")]
         {
-            data.rotation = (*body1.rotation * basis1).angle_between(*body2.rotation * basis2);
+            data.rotation =
+                (Rot::from(*body1.rotation) * basis1).angle_to(Rot::from(*body2.rotation) * basis2);
         }
         #[cfg(feature = "3d")]
         {
@@ -59,11 +60,7 @@ impl SoftJoint for FixedJoint {
         #[cfg(feature = "2d")]
         let (error, inv_mass, mean) = {
             let k = bodies.i1 + bodies.i2;
-            let error = data.rotation
-                + bodies
-                    .b1
-                    .delta_rotation
-                    .angle_between(bodies.b2.delta_rotation);
+            let error = data.rotation + bodies.b1.delta_rotation.angle_to(bodies.b2.delta_rotation);
             (error, k.recip_or_zero(), k)
         };
         #[cfg(feature = "3d")]

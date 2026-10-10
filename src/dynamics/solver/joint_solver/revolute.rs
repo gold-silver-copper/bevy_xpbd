@@ -47,11 +47,7 @@ impl RevoluteJointSolverData {
     fn hinge(&self, bodies: &Bodies) -> (AngularVector, f32) {
         #[cfg(feature = "2d")]
         {
-            let angle = self.angle
-                + bodies
-                    .b1
-                    .delta_rotation
-                    .angle_between(bodies.b2.delta_rotation);
+            let angle = self.angle + bodies.b1.delta_rotation.angle_to(bodies.b2.delta_rotation);
             (1.0, angle)
         }
         #[cfg(feature = "3d")]
@@ -88,7 +84,8 @@ impl SoftJoint for RevoluteJoint {
         let [body1, body2] = bodies;
         #[cfg(feature = "2d")]
         {
-            data.angle = (*body1.rotation * basis1).angle_between(*body2.rotation * basis2);
+            data.angle =
+                (Rot::from(*body1.rotation) * basis1).angle_to(Rot::from(*body2.rotation) * basis2);
         }
         #[cfg(feature = "3d")]
         {
@@ -173,7 +170,7 @@ impl SoftJoint for RevoluteJoint {
 
         data.point.solve(
             &mut bodies,
-            (self.point_compliance, Rotation::IDENTITY, Vector::INFINITY),
+            (self.point_compliance, Rot::IDENTITY, Vector::INFINITY),
             pass,
         );
     }

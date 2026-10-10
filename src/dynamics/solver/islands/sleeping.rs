@@ -660,7 +660,7 @@ fn wake_all_islands(mut commands: Commands, islands: Res<PhysicsIslands>) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "3d"))]
 mod tests {
     use core::time::Duration;
 
@@ -711,7 +711,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "3d"))]
 mod split_order_tests {
     use core::time::Duration;
 

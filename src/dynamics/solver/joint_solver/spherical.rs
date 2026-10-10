@@ -181,7 +181,7 @@ impl SoftJoint for SphericalJoint {
         if self.point_compliance.is_finite() {
             data.point.solve(
                 &mut bodies,
-                (self.point_compliance, Rotation::IDENTITY, Vector::INFINITY),
+                (self.point_compliance, Rot::IDENTITY, Vector::INFINITY),
                 pass,
             );
         }

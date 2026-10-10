@@ -418,7 +418,7 @@ impl PointPart {
     pub fn solve(
         &mut self,
         bodies: &mut Bodies,
-        (compliance, frame, most): (f32, Rotation, Vector),
+        (compliance, frame, most): (f32, Rot, Vector),
         pass: &Pass,
     ) {
         let (r1, r2) = self.anchors(bodies);
