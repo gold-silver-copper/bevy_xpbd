@@ -1498,7 +1498,7 @@ fn fixed_joint_gives_past_its_most_force() {
         ))
         .id();
     app.world_mut()
-        .spawn(FixedJoint::new(anchor, going).with_max_force(2.0));
+        .spawn(FixedJoint::new(anchor, going).with_max_force(Vector::splat(2.0)));
 
     app.update();
     for _ in 0..(0.25 / TIMESTEP) as usize {

@@ -47,10 +47,12 @@ pub struct FixedJoint {
     pub point_compliance: Scalar,
     /// The compliance of the angular constraint (inverse of stiffness, N * m / rad).
     pub angle_compliance: Scalar,
-    /// The most force the point-to-point constraint holds with (N; infinite by default): past
-    /// it the joint gives, its bodies going on apart, slowed by that force (a hold, a weld or a
-    /// bolt that gives way, against what pins one body while the other is pulled on).
-    pub max_force: Scalar,
+    /// The most force the point-to-point constraint holds with along each of the first body's
+    /// axes (N; infinite by default): past it the joint gives that way, its bodies going on apart,
+    /// slowed by that force (a hold, a weld or a bolt that gives way, against what pins one body
+    /// while the other is pulled on; a seat that holds its rider across it only so hard, and bears
+    /// it up as hard as it lands).
+    pub max_force: Vector,
 }
 
 impl EntityConstraint<2> for FixedJoint {
@@ -70,14 +72,14 @@ impl FixedJoint {
             frame2: JointFrame::IDENTITY,
             point_compliance: 0.0,
             angle_compliance: 0.0,
-            max_force: Scalar::INFINITY,
+            max_force: Vector::splat(Scalar::INFINITY),
         }
     }
 
     /// Sets the most force the point-to-point constraint holds with (see
     /// [`max_force`](Self::max_force)).
     #[inline]
-    pub const fn with_max_force(mut self, max_force: Scalar) -> Self {
+    pub const fn with_max_force(mut self, max_force: Vector) -> Self {
         self.max_force = max_force;
         self
     }

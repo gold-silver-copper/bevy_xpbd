@@ -183,7 +183,7 @@ impl SoftJoint for SphericalJoint {
 
         // The points held together, unless they are free (an infinite compliance: a drive alone).
         if self.point_compliance.is_finite() {
-            data.point.solve(&mut bodies, (self.point_compliance, Scalar::INFINITY), pass);
+            data.point.solve(&mut bodies, (self.point_compliance, Rotation::IDENTITY, Vector::INFINITY), pass);
         }
     }
 }
