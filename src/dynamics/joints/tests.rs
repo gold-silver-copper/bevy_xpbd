@@ -1260,12 +1260,25 @@ fn spherical_motor_respects_max_torque() {
 
     // With a unit inertia, the most the motor can turn the body is `max_torque * t^2 / 2`.
     let body = app.world().entity(dynamic);
-    let turned = body.get::<Rotation>().unwrap().0.angle_between(Quat::IDENTITY);
+    let turned = body
+        .get::<Rotation>()
+        .unwrap()
+        .0
+        .angle_between(Quat::IDENTITY);
     let most = 0.5 * max_torque * duration * duration;
-    assert!(turned > 0.5 * most, "the motor turned the body only {turned} rad");
-    assert!(turned < 1.1 * most, "the motor turned the body {turned} rad, past {most}");
+    assert!(
+        turned > 0.5 * most,
+        "the motor turned the body only {turned} rad"
+    );
+    assert!(
+        turned < 1.1 * most,
+        "the motor turned the body {turned} rad, past {most}"
+    );
     let speed = body.get::<AngularVelocity>().unwrap().0.length();
-    assert!(speed < 1.1 * max_torque * duration, "spinning at {speed} rad/s");
+    assert!(
+        speed < 1.1 * max_torque * duration,
+        "spinning at {speed} rad/s"
+    );
 }
 
 /// Tests that a spherical joint with free points (an infinite point compliance) holds nothing of
@@ -1405,7 +1418,7 @@ fn revolute_limit_pressed_past_holds_its_side() {
 
     app.update();
     // The hinge's angle followed round continuously from where it set off.
-    let (mut angle, mut most) = (2.0 as f32, 0.0 as f32);
+    let (mut angle, mut most) = (2.0_f32, 0.0_f32);
     for _ in 0..(1.0 / TIMESTEP) as usize {
         app.update();
         let q = app.world().entity(dynamic).get::<Rotation>().unwrap().0;
@@ -1451,7 +1464,13 @@ fn joint_forces_add_up_to_the_momentum_taken() {
     let mut taken = Vector::ZERO;
     for _ in 0..(1.0 / TIMESTEP) as usize {
         app.update();
-        taken += app.world().entity(joint).get::<JointForces>().unwrap().force() * TIMESTEP;
+        taken += app
+            .world()
+            .entity(joint)
+            .get::<JointForces>()
+            .unwrap()
+            .force()
+            * TIMESTEP;
     }
     // The forces are on the first body, the static one: the body's push on it.
     assert!(
@@ -1491,7 +1510,13 @@ fn fixed_joint_gives_past_its_most_force() {
     for _ in 0..(0.25 / TIMESTEP) as usize {
         app.update();
     }
-    let v = app.world().entity(going).get::<LinearVelocity>().unwrap().0.x;
+    let v = app
+        .world()
+        .entity(going)
+        .get::<LinearVelocity>()
+        .unwrap()
+        .0
+        .x;
     assert!((v - 0.5).abs() < 0.05, "it goes at {v} m/s");
 }
 
@@ -1627,10 +1652,7 @@ fn limbs_lying_against_their_limits_sleep() {
     };
     let limbs = [limb(world, 0.0), limb(world, 0.4), limb(world, 0.8)];
     let mut ball = SphericalJoint::new(limbs[0], limbs[1])
-        .with_local_frame1(Isometry::new(
-            Vector::X * 0.2,
-            Quat::from_rotation_z(0.6),
-        ))
+        .with_local_frame1(Isometry::new(Vector::X * 0.2, Quat::from_rotation_z(0.6)))
         .with_local_frame2(Isometry::new(Vector::NEG_X * 0.2, Quat::IDENTITY))
         .with_twist_axis(Vector::Z);
     ball.swing_limit = Some(AngleLimit::new(-0.3, 0.3));

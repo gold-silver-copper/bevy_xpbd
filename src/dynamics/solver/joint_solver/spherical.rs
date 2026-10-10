@@ -35,11 +35,7 @@ impl SphericalJoint {
     /// The joint frames' axes in world space as the bodies are now: the cone's axis on each
     /// (perpendicular to the [`twist_axis`](Self::twist_axis), which the swing is measured
     /// from and the twist about), and the frames' rotations.
-    fn now(
-        &self,
-        data: &SphericalJointSolverData,
-        bodies: &Bodies,
-    ) -> ([Vector; 2], [Quat; 2]) {
+    fn now(&self, data: &SphericalJointSolverData, bodies: &Bodies) -> ([Vector; 2], [Quat; 2]) {
         let frames = [
             bodies.b1.delta_rotation * data.frames[0],
             bodies.b2.delta_rotation * data.frames[1],
@@ -183,7 +179,11 @@ impl SoftJoint for SphericalJoint {
 
         // The points held together, unless they are free (an infinite compliance: a drive alone).
         if self.point_compliance.is_finite() {
-            data.point.solve(&mut bodies, (self.point_compliance, Rotation::IDENTITY, Vector::INFINITY), pass);
+            data.point.solve(
+                &mut bodies,
+                (self.point_compliance, Rotation::IDENTITY, Vector::INFINITY),
+                pass,
+            );
         }
     }
 }

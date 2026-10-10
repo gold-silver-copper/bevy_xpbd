@@ -386,7 +386,7 @@ pub struct ContactManifold {
     pub tangent_velocity: Vector,
     /// The most force the contact pushes the bodies apart with, summed over its points
     /// (N, or kg⋅m/s²): past it the contact gives, the bodies going on into each other,
-    /// as matter yields at its strength over the area it meets on (PhysX's `setMaxImpulse`).
+    /// as matter yields at its strength over the area it meets on (`PhysX`'s `setMaxImpulse`).
     ///
     /// Defaults to infinity: a contact that never gives. Set in
     /// [`CollisionHooks::modify_contacts`](crate::collision::hooks::CollisionHooks::modify_contacts).

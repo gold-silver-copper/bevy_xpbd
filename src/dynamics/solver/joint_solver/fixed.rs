@@ -88,6 +88,10 @@ impl SoftJoint for FixedJoint {
         bodies.turn(impulse);
 
         let turn1 = bodies.b1.delta_rotation * data.turn1;
-        data.point.solve(&mut bodies, (self.point_compliance, turn1, self.max_force), pass);
+        data.point.solve(
+            &mut bodies,
+            (self.point_compliance, turn1, self.max_force),
+            pass,
+        );
     }
 }

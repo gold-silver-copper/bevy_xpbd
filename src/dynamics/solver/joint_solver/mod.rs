@@ -266,11 +266,7 @@ pub fn motor_softness(model: MotorModel, k: f32, h: f32) -> Option<SoftnessCoeff
 
 /// The bias, mass scale and impulse scale of a part with error `c` this pass: a spring's in both
 /// passes, a rigid part's only in the solve pass.
-pub fn softness(
-    c: f32,
-    spring: Option<SoftnessCoefficients>,
-    pass: &Pass,
-) -> (f32, f32, f32) {
+pub fn softness(c: f32, spring: Option<SoftnessCoefficients>, pass: &Pass) -> (f32, f32, f32) {
     match spring {
         Some(s) => (s.bias * c, s.mass_scale, s.impulse_scale),
         None if pass.use_bias => (

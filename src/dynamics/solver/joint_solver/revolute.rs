@@ -171,6 +171,10 @@ impl SoftJoint for RevoluteJoint {
             bodies.turn(across[0] * impulse.x + across[1] * impulse.y);
         }
 
-        data.point.solve(&mut bodies, (self.point_compliance, Rotation::IDENTITY, Vector::INFINITY), pass);
+        data.point.solve(
+            &mut bodies,
+            (self.point_compliance, Rotation::IDENTITY, Vector::INFINITY),
+            pass,
+        );
     }
 }
