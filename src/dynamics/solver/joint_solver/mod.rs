@@ -597,7 +597,8 @@ fn solve<J: SoftJoint, S: Stage>(
     }
 }
 
-/// Writes each joint's mean impulses over the step as forces.
+/// Writes each joint's mean impulses over the step as forces: on the first body, as the XPBD
+/// joints' are (the impulses here are on the second).
 fn write_forces<J: SoftJoint>(
     mut joints: Query<(&StepImpulses, &mut JointForces), With<J>>,
     time: Res<Time<Substeps>>,
@@ -606,8 +607,8 @@ fn write_forces<J: SoftJoint>(
     for (step, mut forces) in &mut joints {
         let per = 1.0 / (h * step.substeps.max(1) as f32);
         let (linear, angular, motor) = step.sum;
-        forces.set_force(linear * per);
-        forces.set_torque(angular * per);
+        forces.set_force(-linear * per);
+        forces.set_torque(-angular * per);
         forces.set_motor_force(motor * per);
     }
 }
